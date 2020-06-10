@@ -14,6 +14,6 @@ class DNN(nn.Module):
 
     def forward(self, x):
         x = F.dropout(F.elu(self.fc1(x)), p=0.5)
-        #x = F.elu(self.fc2(x))
+        #x = F.dropout(F.elu(self.fc2(x)), p=0.5)
         x = self.fc3(x)
         return x

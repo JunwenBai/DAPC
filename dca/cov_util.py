@@ -20,12 +20,29 @@ def rectify_spectrum(cov, epsilon=1e-6, verbose=False):
     verbose : bool
         Whethere to print when the spectrum needs to be rectified.
     """
-    min_eig = np.min(sp.linalg.eigvalsh(cov))
+    min_eig = np.min(sp.linalg.eigvalsh(cov.detach().cpu().numpy()))
     if min_eig < 0:
-        cov += (-min_eig + epsilon) * np.eye(cov.shape[0])
+        cov += (-min_eig + epsilon) * torch.eye(cov.shape[0])
         if verbose:
             print("Warning: non-PSD matrix (had to increase eigenvalues)")
 
+def torch_toeplitzify(cov, T, N, symmetrize=True):
+    cov_toep = torch.zeros(T * N, T * N).to(cov.device)
+    for delta_t in range(T):
+        to_avg_lower = torch.zeros(T - delta_t, N, N)
+        to_avg_upper = torch.zeros(T - delta_t, N, N)
+        for i in range(T - delta_t):
+            to_avg_lower[i] = cov[(delta_t + i) * N:(delta_t + i + 1) * N, i * N:(i + 1) * N]
+            to_avg_upper[i] = cov[i * N:(i + 1) * N, (delta_t + i) * N:(delta_t + i + 1) * N]
+        avg_lower = torch.mean(to_avg_lower, axis=0)
+        avg_upper = torch.mean(to_avg_upper, axis=0)
+        if symmetrize:
+            avg_lower = 0.5 * (avg_lower + avg_upper.T)
+            avg_upper = avg_lower.T
+        for i in range(T - delta_t):
+            cov_toep[(delta_t + i) * N:(delta_t + i + 1) * N, i * N:(i + 1) * N] = avg_lower
+            cov_toep[i * N:(i + 1) * N, (delta_t + i) * N:(delta_t + i + 1) * N] = avg_upper
+    return cov_toep
 
 def toeplitzify(cov, T, N, symmetrize=True):
     """Make a matrix block-Toeplitz by averaging along the block diagonal.
@@ -63,20 +80,6 @@ def toeplitzify(cov, T, N, symmetrize=True):
             cov_toep[(delta_t + i) * N:(delta_t + i + 1) * N, i * N:(i + 1) * N] = avg_lower
             cov_toep[i * N:(i + 1) * N, (delta_t + i) * N:(delta_t + i + 1) * N] = avg_upper
     
-    '''print(cov[:3, :3])
-    print(cov[3:6, 3:6])
-    print(cov[6:9, 6:9])
-    print(cov[9:12, 9:12])
-    print("----------")
-    print((cov[:3, :3]+cov[3:6, 3:6]+cov[6:9, 6:9]+cov[9:12, 9:12])/4.)
-    print("----------")
-    print(cov_toep[:3, :3])
-    print(cov_toep[3:6, 3:6])
-    print(cov_toep[6:9, 6:9])
-    print(cov_toep[9:12, 9:12])
-    print("----------")
-    print(np.amin(cov_toep-cov), np.amax(cov_toep-cov))'''
-
     return cov_toep
 
 
@@ -193,19 +196,19 @@ def calc_cross_cov_mats_from_data(X, T, mean=None, chunks=None, regularization=N
             mean = X.mean(axis=0, keepdims=True)
         X = X - mean
         N = X.shape[-1]
+        num_samples = X.shape[0]
         if chunks is None:
-            X_with_lags = form_lag_matrix(X, T, stride=stride, stride_tricks=stride_tricks)
-            #print("X:", X.shape)
-            #print("X_with_lags:", X_with_lags.shape)
-            cov_est = np.cov(X_with_lags, rowvar=False)
-            #print("cov_est:", cov_est.shape)
+            X_with_lags = X.flatten().unfold(0, N*T, N)
+            #cov = np.cov(X_with_lags.detach().numpy(), rowvar=False)
+            X_with_lags_mean = X_with_lags.mean(axis=0, keepdims=True)
+            cov_est = (X_with_lags - X_with_lags_mean).t().matmul(X_with_lags - X_with_lags_mean) / (num_samples-1.)
         else:
             cov_est, n_samples = calc_chunked_cov(X, T, stride, chunks,
                                                   stride_tricks=stride_tricks)
             cov_est /= (n_samples - 1.)
 
     if regularization is None:
-        cov_est = toeplitzify(cov_est, T, N)
+        cov_est = torch_toeplitzify(cov_est, T, N)
     elif regularization == 'kron':
         num_folds = reg_ops.get('num_folds', 5)
         r_vals = np.arange(1, min(2 * T, N**2 + 1))
@@ -219,16 +222,9 @@ def calc_cross_cov_mats_from_data(X, T, mean=None, chunks=None, regularization=N
     else:
         raise ValueError
 
-    rectify_spectrum(cov_est, verbose=False)
+    #rectify_spectrum(cov_est, verbose=False)
     cross_cov_mats = calc_cross_cov_mats_from_cov(cov_est, T, N)
     
-    '''print(cov_est[:3, :3].T)
-    print(cov_est[:3, 3:6].T)
-    print(cov_est[:3, 6:9].T)
-    print(cov_est[:3, 9:12].T)
-    print("-----------")
-    print(cross_cov_mats)'''
-
     return cross_cov_mats
 
 
@@ -254,7 +250,7 @@ def calc_cross_cov_mats_from_cov(cov, T, N):
     use_torch = isinstance(cov, torch.Tensor)
 
     if use_torch:
-        cross_cov_mats = torch.zeros((T, N, N))
+        cross_cov_mats = torch.zeros((T, N, N)).to(cov.device)
     else:
         cross_cov_mats = np.zeros((T, N, N))
 

@@ -54,7 +54,7 @@ def plot_3d_sig(X_dca, plt_idx=300, fig_name="X_dca.png"): # plot 3-d signals in
     plt.savefig("figs/{}".format(fig_name))
     plt.clf()
 
-seed=19941226
+seed=19940423
 np.random.seed(seed) # fix the seed
 torch.manual_seed(seed) # fix the seed
 
@@ -124,15 +124,15 @@ with h5py.File(RESULTS_FILENAME, "w") as f:
         X_dca = np.dot(X_noisy_val, V_dca) # recontructed 3-d signals: X_dca
 
         # Run deep DCA
-        opt = dDCA(T=T, d=3, use_scipy=False, block_toeplitz=False, ortho_lambda=0., init="random_ortho")
+        opt = dDCA(T=T, d=3, use_scipy=False, block_toeplitz=False, ortho_lambda=0., smooth_lambda=0., init="random_ortho")
         opt.fit(torch.Tensor(X_noisy_train), torch.Tensor(X_noisy_val), torch.Tensor(X_dyn_val), writer)
         dca_model = opt.model
         #dca_model.fc1.weight.data = torch.Tensor(scipy.linalg.orth(dca_model.fc1.weight.data.t().detach().numpy())).t()
         #dca_model.fc2.weight.data = torch.Tensor(scipy.linalg.orth(dca_model.fc2.weight.data.t().detach().numpy())).t()
         X_ddca = dca_model(torch.Tensor(X_noisy_val)).detach().cpu().numpy() # reconstruct 3-d signals: X_ddca
 
-        plot_3d_sig(X_dca, plt_idx=300, fig_name="X_dca_T-{}.png".format(T))
-        plot_3d_sig(X_ddca, plt_idx=300, fig_name="X_ddca_T-{}.png".format(T))
+        plot_3d_sig(X_dca, plt_idx=600, fig_name="X_dca_T-{}.png".format(T))
+        plot_3d_sig(X_ddca, plt_idx=600, fig_name="X_ddca_T-{}.png".format(T))
         
         #Linearly trasnform projected data to be close to original Lorenz attractor
         '''beta_pca = np.linalg.lstsq(X_pca, X_dynamics, rcond=None)[0]
@@ -145,9 +145,9 @@ with h5py.File(RESULTS_FILENAME, "w") as f:
         X_ddca_trans = match(X_ddca, X_dyn_val, 15000)
 
         # plot reconstructed Lorenz attractor and the ground-truth
-        plot_3d_sig(X_dca_trans, plt_idx=300, fig_name="X_dca_trans_T-{}.png".format(T))
-        plot_3d_sig(X_ddca_trans, plt_idx=300, fig_name="X_ddca_trans_T-{}.png".format(T))
-        plot_3d_sig(X_dynamics, plt_idx=300, fig_name="X_true.png")
+        plot_3d_sig(X_dca_trans, plt_idx=600, fig_name="X_dca_trans_T-{}.png".format(T))
+        plot_3d_sig(X_ddca_trans, plt_idx=600, fig_name="X_ddca_trans_T-{}.png".format(T))
+        plot_3d_sig(X_dyn_val, plt_idx=600, fig_name="X_true.png")
 
         #Save transformed projections
         X_dca_trans_dset[snr_idx] = X_dca_trans
@@ -187,11 +187,11 @@ dca_color = "#CF2F25"
 ddca_color = "black"
 
 T_to_show_2d = 150
-T_to_show_3d = 500
+T_to_show_3d = 600
 X_display_idx = 0 #index of noisy X dataset to show (make sure to change if SNR spacing changes)
 
 #ax1: Lorenz 3D Plot
-plot_lorenz_3d(ax1, X_dynamics[:T_to_show_3d], linewidth_3d)
+plot_lorenz_3d(ax1, X_dyn_val[:T_to_show_3d], linewidth_3d)
 
 #ax2 and ax3: Plots of noiseless and noisy embeddings
 N_to_show = 5 #number of channels to plot (also plot last one)

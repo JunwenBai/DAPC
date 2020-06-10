@@ -227,7 +227,7 @@ class DynamicalComponentsAnalysis(object):
     """
     def __init__(self, d=None, T=None, init="random_ortho", n_init=1, tol=1e-6,
                  ortho_lambda=10., verbose=False, use_scipy=True, block_toeplitz=None,
-                 chunk_cov_estimate=None, device="cpu", dtype=torch.float64, rng_or_seed=None):
+                 chunk_cov_estimate=None, device="cpu", dtype=torch.float32, rng_or_seed=None):
         self.d = d
         self.T = T
         self.init = init
@@ -288,13 +288,13 @@ class DynamicalComponentsAnalysis(object):
             self.mean_ = np.concatenate(X).mean(axis=0, keepdims=True)
         else:
             self.mean_ = X.mean(axis=0, keepdims=True)
-
+        
         cross_covs = calc_cross_cov_mats_from_data(X, 2 * self.T, mean=self.mean_,
                                                    chunks=self.chunk_cov_estimate,
                                                    regularization=regularization,
                                                    reg_ops=reg_ops)
         #print("cross_covs:", cross_covs.shape)
-        cross_covs = torch.tensor(cross_covs, device=self.device, dtype=self.dtype)
+        #cross_covs = torch.tensor(cross_covs, device=self.device, dtype=self.dtype)
         delta_time = round((time.time() - start) / 60., 1)
         self._logger.info('Cross covariance estimate took {:0.1f} minutes.'.format(delta_time))
 
@@ -405,26 +405,6 @@ class DynamicalComponentsAnalysis(object):
                            callback=lambda x: callback(x, objective))
             v = opt.x.reshape(N, d)
         else:
-            '''optimizer = torch.optim.LBFGS([v], max_eval=15000, max_iter=15000,
-                                          tolerance_change=self.tol, history_size=10,
-                                          line_search_fn='strong_wolfe')
-
-            def closure():
-                optimizer.zero_grad()
-                loss = build_loss(c, d, self.ortho_lambda, self.block_toeplitz)(v)
-                loss.backward()
-                if self.verbose:
-                    reg_val = ortho_reg_fn(v, self.ortho_lambda)
-                    loss_no_reg = loss - reg_val
-                    pi = -loss_no_reg.detach().cpu().numpy()
-                    reg_val = reg_val.detach().cpu().numpy()
-                    print("PI: {} nats, reg: {}".format(str(np.round(pi, 4)),
-                                                        str(np.round(reg_val, 4))))
-                return loss
-
-            optimizer.step(closure)
-            v = v.detach().cpu().numpy()'''
-            
             optimizer = torch.optim.Adam([v], lr=1e-3)
             for epoch in range(1500):
                 optimizer.zero_grad()
@@ -444,7 +424,7 @@ class DynamicalComponentsAnalysis(object):
                 loss_no_reg = loss - reg_val
                 writer.add_scalar('val/val DCA PI', -loss_no_reg, epoch)
                 
-                I = torch.eye(v.shape[1], dtype=torch.double)
+                I = torch.eye(v.shape[1], dtype=torch.float).to(self.device)
                 c = self.estimate_cross_covariance(Y_val_gt)
                 loss = build_loss(c, d, self.ortho_lambda, self.block_toeplitz)(I)
                 reg_val = ortho_reg_fn(I, self.ortho_lambda)
@@ -483,6 +463,7 @@ class DynamicalComponentsAnalysis(object):
         if n_init is None:
             n_init = self.n_init
         #self.estimate_cross_covariance(X_train, T=T, regularization=regularization, reg_ops=reg_ops)
+        X_train, X_val, Y_val_gt = torch.Tensor(X_train).to(self.device), torch.Tensor(X_val).to(self.device), torch.Tensor(Y_val_gt).to(self.device)
         self.fit_projection(X_train, X_val, Y_val_gt, writer, d=d, n_init=n_init)
         return self
 

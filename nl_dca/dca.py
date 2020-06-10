@@ -21,8 +21,13 @@ __all__ = ['DynamicalComponentsAnalysis',
 
 logging.basicConfig()
 
+def smooth_reg_Y(Y, smooth_lambda=1.):
+    d = Y.shape[1]
+    Y_flat = Y.flatten()
+    smooth_reg = F.l1_loss(Y_flat[d:], Y_flat[:-d]) * smooth_lambda
+    return smooth_reg
 
-def ortho_reg_Y(Y, ortho_lambda):
+def ortho_reg_Y(Y, ortho_lambda=1.):
     d = Y.shape[1]
     I = torch.eye(d)
     ones = torch.ones(d, d)
@@ -239,7 +244,7 @@ class DynamicalComponentsAnalysis(object):
         What dtype to use for computation.
     """
     def __init__(self, d=None, T=None, init="random_ortho", n_init=1, tol=1e-6,
-                 ortho_lambda=10., verbose=False, use_scipy=True, block_toeplitz=None,
+                 ortho_lambda=10., smooth_lambda=0., verbose=False, use_scipy=True, block_toeplitz=None,
                  chunk_cov_estimate=None, device="cpu", dtype=torch.float64, rng_or_seed=None):
         self.d = d
         self.T = T
@@ -247,6 +252,7 @@ class DynamicalComponentsAnalysis(object):
         self.n_init = n_init
         self.tol = tol
         self.ortho_lambda = ortho_lambda
+        self.smooth_lambda = smooth_lambda
         self.verbose = verbose
         self._logger = logging.getLogger('DCA')
         if verbose:
@@ -342,11 +348,13 @@ class DynamicalComponentsAnalysis(object):
         idx = np.argmax(pis)
         self.coef_ = coefs[idx]
 
-    def build_nn_loss(self, Y, ortho_lambda=1.):
+    def build_nn_loss(self, Y, ortho_lambda=1., smooth_lambda=1.):
         c = self.estimate_cross_covariance(Y) # cross covariance: 2T * d * d 
         loss = -calc_pi_from_cross_cov_mats(c) # compute negative pi from the cross covariance
-        reg = ortho_reg_Y(Y, ortho_lambda) # orthognal regularization
-        return loss + reg, loss
+        ortho_reg = ortho_reg_Y(Y, ortho_lambda) # orthognal regularization
+        smooth_reg = smooth_reg_Y(Y, smooth_lambda)
+        #print(loss.item(), ortho_reg.item(), smooth_reg.item())
+        return loss + ortho_reg + smooth_reg, loss
 
     def _fit_projection(self, X_train, X_val, Y_val_gt, writer, d=None, record_V=False):
         if d is None:
@@ -368,7 +376,7 @@ class DynamicalComponentsAnalysis(object):
                 model.train()
                 optimizer.zero_grad()
                 Y_train = model(X_train[i*batch_size: (i+1)*batch_size])
-                loss, neg_pi = self.build_nn_loss(Y_train, self.ortho_lambda) # build loss and pi for the latent low-dim representations
+                loss, neg_pi = self.build_nn_loss(Y_train, self.ortho_lambda, self.smooth_lambda) # build loss and pi for the latent low-dim representations
                 tot_pi += -neg_pi
                 loss.backward()
                 optimizer.step()
@@ -380,10 +388,10 @@ class DynamicalComponentsAnalysis(object):
 
             model.eval()
             Y_val = model(X_val)
-            val_loss, neg_val_pi = self.build_nn_loss(Y_val, self.ortho_lambda) # evaluate loss and pi for the validation set
+            val_loss, neg_val_pi = self.build_nn_loss(Y_val, self.ortho_lambda, self.smooth_lambda) # evaluate loss and pi for the validation set
             writer.add_scalar('val/val dDCA PI', -neg_val_pi, epoch)
 
-            gt_loss, neg_gt_pi = self.build_nn_loss(Y_val_gt, self.ortho_lambda) # evaluate the ground-truth pi
+            gt_loss, neg_gt_pi = self.build_nn_loss(Y_val_gt, self.ortho_lambda, self.smooth_lambda) # evaluate the ground-truth pi
             writer.add_scalar('gt/gt dDCA PI', -neg_gt_pi, epoch)
 
         self.model = model
