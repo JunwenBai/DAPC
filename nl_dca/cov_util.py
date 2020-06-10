@@ -193,19 +193,10 @@ def calc_cross_cov_mats_from_data(X, T, mean=None, chunks=None, regularization=N
         N = X.shape[-1]
         num_samples = X.shape[0]
         if chunks is None:
-            '''X = X.detach().numpy()
-            X_with_lags = form_lag_matrix(X, T, stride=stride, stride_tricks=stride_tricks)'''
             X_with_lags = X.flatten().unfold(0, N*T, N)
-            '''print("X:", X.shape)
-            print("X_with_lags:", X_with_lags.shape)
-            print(X[:5, :])
-            print(X_with_lags[:5, :])
-            exit()'''
-            cov = np.cov(X_with_lags.detach().numpy(), rowvar=False)
+            #cov = np.cov(X_with_lags.detach().numpy(), rowvar=False)
             X_with_lags_mean = X_with_lags.mean(axis=0, keepdims=True)
             cov_est = (X_with_lags - X_with_lags_mean).t().matmul(X_with_lags - X_with_lags_mean) / (num_samples-1.)
-            #print("cov_est:", cov_est.shape)
-            #print((cov_est-cov)[:5, :])
         else:
             cov_est, n_samples = calc_chunked_cov(X, T, stride, chunks,
                                                   stride_tricks=stride_tricks)
