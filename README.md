@@ -17,9 +17,9 @@ After downloading the code repo, one should create two folders `results` and `fi
 
 Then simply run
 
-```python nonlinear_lorenz.py 4```
+```python nonlinear_lorenz.py 4 0```
 
-`4` the the size of the time window `T`.
+`4` the the size of the time window `T`. `0` is the random seed.
 
 ### References
 
