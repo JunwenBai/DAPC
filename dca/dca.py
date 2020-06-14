@@ -227,7 +227,7 @@ class DynamicalComponentsAnalysis(object):
     """
     def __init__(self, d=None, T=None, init="random_ortho", n_init=1, tol=1e-6,
                  ortho_lambda=10., verbose=False, use_scipy=True, block_toeplitz=None,
-                 chunk_cov_estimate=None, device="cpu", dtype=torch.float32, rng_or_seed=None):
+                 chunk_cov_estimate=None, max_epochs=2000, device="cpu", dtype=torch.float32, rng_or_seed=None):
         self.d = d
         self.T = T
         self.init = init
@@ -235,6 +235,7 @@ class DynamicalComponentsAnalysis(object):
         self.tol = tol
         self.ortho_lambda = ortho_lambda
         self.verbose = verbose
+        self.max_epochs = max_epochs
         self._logger = logging.getLogger('DCA')
         if verbose:
             self._logger.setLevel(logging.DEBUG)
@@ -406,7 +407,7 @@ class DynamicalComponentsAnalysis(object):
             v = opt.x.reshape(N, d)
         else:
             optimizer = torch.optim.Adam([v], lr=1e-3)
-            for epoch in range(1500):
+            for epoch in range(self.max_epochs):
                 optimizer.zero_grad()
                 c = self.estimate_cross_covariance(X_train)
                 loss = build_loss(c, d, self.ortho_lambda, self.block_toeplitz)(v)

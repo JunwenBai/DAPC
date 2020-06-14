@@ -61,20 +61,6 @@ def torch_toeplitzify(cov, T, N, symmetrize=True):
             cov_toep[(delta_t + i) * N:(delta_t + i + 1) * N, i * N:(i + 1) * N] = avg_lower
             cov_toep[i * N:(i + 1) * N, (delta_t + i) * N:(delta_t + i + 1) * N] = avg_upper
     
-    '''print(cov[:3, :3])
-    print(cov[3:6, 3:6])
-    print(cov[6:9, 6:9])
-    print(cov[9:12, 9:12])
-    print("----------")
-    print((cov[:3, :3]+cov[3:6, 3:6]+cov[6:9, 6:9]+cov[9:12, 9:12])/4.)
-    print("----------")
-    print(cov_toep[:3, :3])
-    print(cov_toep[3:6, 3:6])
-    print(cov_toep[6:9, 6:9])
-    print(cov_toep[9:12, 9:12])
-    print("----------")
-    print(np.amin(cov_toep-cov), np.amax(cov_toep-cov))'''
-
     return cov_toep
 
 

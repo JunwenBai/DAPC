@@ -188,8 +188,7 @@ def plot_traces(ax, X, N_to_show, linewidth):
             fontweight="normal")
 
 
-def plot_dca_demo(ax_top, ax_bottom, X_random_trans, X_dca_trans, past_color, future_color,
-                  linewidth):
+def plot_dca_demo(ax_top, ax_bottom, X_random_trans, X_dca_trans, past_color, future_color, linewidth, label="DCA"):
     # plot traces
     y_spacing = 3
     max_y = 2 * y_spacing
@@ -236,13 +235,13 @@ def plot_dca_demo(ax_top, ax_bottom, X_random_trans, X_dca_trans, past_color, fu
                    fontsize=style.axis_label_fontsize)
 
     ax_top.set_ylabel("random", fontsize=style.axis_label_fontsize * 0.8, labelpad=1)
-    ax_bottom.set_ylabel("d-DCA", fontsize=style.axis_label_fontsize * 0.8, labelpad=1)
+    ax_bottom.set_ylabel(label, fontsize=style.axis_label_fontsize * 0.8, labelpad=1)
 
 
-def plot_r2(ax, snr_vals, plt_snr_vals, r2_vals, dca_color, pca_color):
-    ax.plot(snr_vals, r2_vals[:, 1], label="DCA", linewidth=1, marker=".", markersize=3,
+def plot_r2(ax, snr_vals, plt_snr_vals, r2_vals, dca_color, pca_color, label1, label2):
+    ax.plot(snr_vals, r2_vals[:, 0], label=label1, linewidth=1, marker=".", markersize=3,
             c=dca_color, zorder=10)
-    ax.plot(snr_vals, r2_vals[:, 0], label="d-DCA", linewidth=1, marker=".", markersize=3,
+    ax.plot(snr_vals, r2_vals[:, 1], label=label2, linewidth=1, marker=".", markersize=3,
             c=pca_color, zorder=11)
     ax.set_xscale("log")
     for snr in plt_snr_vals:
