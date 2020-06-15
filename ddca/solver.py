@@ -4,20 +4,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.nn.utils.rnn import pad_packed_sequence
+import logging
 
 class DNN(nn.Module):
     
-    def __init__(self, n_input, n_output, dropout=0.5, n_hid=128, use_sigmoid=False):
+    def __init__(self, n_input, n_output, dropout=0.5, n_hid=512, use_sigmoid=False):
         super(DNN, self).__init__()
         self.dropout = dropout
         self.fc1 = nn.Linear(n_input, n_hid)
-        #self.fc2 = nn.Linear(n_hid, n_hid)
+        self.fc2 = nn.Linear(n_hid, n_hid)
         self.fc3 = nn.Linear(n_hid, n_output)
         #self.lists = nn.ModuleList([self.fc1, self.fc2])
 
     def forward(self, x):
         x = F.dropout(F.elu(self.fc1(x)), p=self.dropout)
-        #x = F.dropout(F.elu(self.fc2(x)), p=0.5)
+        x = F.dropout(F.elu(self.fc2(x)), p=self.dropout)
         x = self.fc3(x)
         return x
 
@@ -52,7 +53,7 @@ class RNN(torch.nn.Module):
         :return: batch of hidden state sequences (B, Tmax, eprojs)
         :rtype: torch.Tensor
         """
-        #logging.info(self.__class__.__name__ + ' input lengths: ' + str(ilens))
+        logging.info(self.__class__.__name__ + ' input lengths: ' + str(ilens))
         xs_pack = pack_padded_sequence(xs_pad, ilens, batch_first=True)
         self.nbrnn.flatten_parameters()
         if prev_state is not None and self.nbrnn.bidirectional:

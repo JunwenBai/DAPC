@@ -1,11 +1,10 @@
-import torch
-import torch.nn as nn
 import numpy as np
 import scipy
 from ddca.plotting import lorenz_fig_axes, plot_3d, plot_lorenz_3d, plot_traces, plot_dca_demo, plot_r2, plot_cov
 import matplotlib.pyplot as plt
 
-def plot_figs(dca_recons, ddca_recons, X_dyn_val, X_clean_val, X_noisy_val, r2_vals, snr_vals, label1="DCA", label2="d-DCA", fig_name="figs/fig1.pdf"):
+def plot_figs(dca_recons, ddca_recons, X_dyn_val, X_clean_val, X_noisy_val, r2_vals, snr_vals,
+			  label1="DCA", label2="d-DCA", fig_name="figs/fig1.pdf"):
 	#Create axes
 	dca_recons, ddca_recons, snr_vals = np.array(dca_recons), np.array(ddca_recons), np.array(snr_vals)
 	axes, txt_cords = lorenz_fig_axes(fig_width=5.5,
