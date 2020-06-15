@@ -132,10 +132,9 @@ if __name__ == "__main__":
         X_train_seqs, L_train = chunk_long_seq(X_noisy_train, 30, 500)
         X_valid_seqs, L_valid = chunk_long_seq(X_noisy_val, 30, 500)
         fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs, L_valid, writer,
-                          use_gpu, batch_size=20, max_epochs=100)
+                          use_gpu, batch_size=20, max_epochs=50)
         pdb.set_trace()
         X_ddca = ddca_model.encode(torch.from_numpy(X_noisy_val[:500,:]).to(device))
-        X_ddca = X_ddca.cpu()
         # print("X_ddca:", X_ddca.shape)
         # ddca_model = opt.model
         # X_ddca = ddca_model(torch.Tensor(X_noisy_val)).detach().cpu().numpy() # reconstruct 3-d signals: X_ddca
