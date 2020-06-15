@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 from ddca import DynamicalComponentsAnalysis as dDCA
 from ddca.data_gen import gen_nonlinear_noisy_lorenz, gen_lorenz_data
-from models import DNN, Match_DNN
+from models.DNN import DNN, Match_DNN
 from plotter import plot_figs
 from dca import DynamicalComponentsAnalysis as DCA
 
@@ -69,6 +69,7 @@ if __name__ == "__main__":
     seed = int(sys.argv[2])
     np.random.seed(seed) # fix the seed
     torch.manual_seed(seed) # fix the seed
+    torch.cuda.manual_seed(seed)
 
     N = 30 # lift projection dim
     noise_dim = 7 # noisify raw DCA
@@ -89,22 +90,23 @@ if __name__ == "__main__":
         X_noisy_train, X_noisy_val = split(X_noisy, split_rate)
         X_dyn_train, X_dyn_val = split(X_dynamics, split_rate)
         writer = SummaryWriter('runs/ddca_T-{}'.format(T))
+        
+        # deep DCA
+        print("Training d-DCA")
+        opt = dDCA(T=T, d=3, use_scipy=False, block_toeplitz=False, ortho_lambda=1., smooth_lambda=0., init="random_ortho", max_epochs=201, dropout=0.5, solver="gru", batch_size=1, device="cuda:0")
+        X_ddca = opt.fit(torch.Tensor(X_noisy_train), torch.Tensor(X_noisy_val), torch.Tensor(X_dyn_val), writer)
+        #print("X_ddca:", X_ddca.shape)
+        #ddca_model = opt.model
+        #X_ddca = ddca_model(torch.Tensor(X_noisy_val)).detach().cpu().numpy() # reconstruct 3-d signals: X_ddca
+        #X_ddca = smoothen(X_ddca)
 
         # Linear DCA
         print("Training DCA")
-        opt = DCA(T=T, d=3, use_scipy=False, block_toeplitz=False, ortho_lambda=10., init="random_ortho", max_epochs=1500)
+        opt = DCA(T=T, d=3, use_scipy=False, block_toeplitz=False, ortho_lambda=10., init="random_ortho", max_epochs=2000)
         opt.fit(X_noisy_train, X_noisy_val, X_dyn_val, writer)
         V_dca = opt.coef_ # transformation matrix
         X_dca = np.dot(X_noisy_val, V_dca) # recontructed 3-d signals: X_dca
-        X_dca = smoothen(X_dca)
-
-        # deep DCA
-        print("Training d-DCA")
-        opt = dDCA(T=T, d=3, use_scipy=False, block_toeplitz=False, ortho_lambda=0., smooth_lambda=0., init="random_ortho", max_epochs=301, dropout=0.5)
-        opt.fit(torch.Tensor(X_noisy_train), torch.Tensor(X_noisy_val), torch.Tensor(X_dyn_val), writer)
-        dca_model = opt.model
-        X_ddca = dca_model(torch.Tensor(X_noisy_val)).detach().cpu().numpy() # reconstruct 3-d signals: X_ddca
-        X_ddca = smoothen(X_ddca)
+        #X_dca = smoothen(X_dca)
 
         print()
         # match DCA with ground-truth
@@ -112,7 +114,7 @@ if __name__ == "__main__":
         X_dca_recon = match(X_dca, X_dyn_val, 15000)
         # match d-DCA with ground-truth
         print("Matching d-DCA")
-        X_ddca_recon = match(X_ddca, X_dyn_val, 15000)
+        X_ddca_recon = match(X_ddca.detach().cpu(), X_dyn_val, 15000)
 
         # R2 of dca
         r2_dca = 1 - np.sum((X_dca_recon - X_dyn_val)**2)/np.sum((X_dyn_val - np.mean(X_dyn_val, axis=0))**2)
