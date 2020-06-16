@@ -37,14 +37,10 @@ def plot_figs(dca_recons, ddca_recons, X_dyn_val, X_clean_val, X_noisy_val, r2_v
 	#divide by a factor to make it look better
 	plot_traces(ax3, X_noisy_val[:T_to_show_2d], N_to_show, linewidth_2d)
 
-	#ax4 and ax5: Plots of projections (dDCA and random)
+	#ax4 and ax5: Plots of projections (DCA and dDCA)
 	#get a random projection of X_noisy and transorm for Lorenz comparison
-	to_proj = X_noisy_val
-	X_random = np.dot(to_proj, scipy.stats.ortho_group.rvs(to_proj.shape[1])[:, :3])
-	beta_random = np.linalg.lstsq(X_random, X_dyn_val, rcond=None)[0]
-	X_random_trans = np.dot(X_random, beta_random)
-	plot_dca_demo(ax4, ax5, X_random_trans[:T_to_show_2d], ddca_recons[X_display_idx, :T_to_show_2d],
-				  past_color=past_color, future_color=future_color, linewidth=linewidth_2d, label=label2)
+	plot_dca_demo(ax4, ax5, dca_recons[X_display_idx, :T_to_show_2d], ddca_recons[X_display_idx, :T_to_show_2d],
+				  past_color=past_color, future_color=future_color, linewidth=linewidth_2d, label1=label1, label2=label2)
 	
 	#Plot Lorenz panels (Qualitative results of 3d projection)
 	dca_axes = [ax6, ax8, ax10]

@@ -188,7 +188,7 @@ def plot_traces(ax, X, N_to_show, linewidth):
             fontweight="normal")
 
 
-def plot_dca_demo(ax_top, ax_bottom, X_random_trans, X_dca_trans, past_color, future_color, linewidth, label="DCA"):
+def plot_dca_demo(ax_top, ax_bottom, X_random_trans, X_dca_trans, past_color, future_color, linewidth, label1="DCA", label2="dDCA"):
     # plot traces
     y_spacing = 3
     max_y = 2 * y_spacing
@@ -234,8 +234,8 @@ def plot_dca_demo(ax_top, ax_bottom, X_random_trans, X_dca_trans, past_color, fu
                    horizontalalignment='center', verticalalignment='top',
                    fontsize=style.axis_label_fontsize)
 
-    ax_top.set_ylabel("random", fontsize=style.axis_label_fontsize * 0.8, labelpad=1)
-    ax_bottom.set_ylabel(label, fontsize=style.axis_label_fontsize * 0.8, labelpad=1)
+    ax_top.set_ylabel(label1, fontsize=style.axis_label_fontsize * 0.8, labelpad=1)
+    ax_bottom.set_ylabel(label2, fontsize=style.axis_label_fontsize * 0.8, labelpad=1)
 
 
 def plot_r2(ax, snr_vals, plt_snr_vals, r2_vals, dca_color, pca_color, label1, label2):
