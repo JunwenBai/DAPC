@@ -9,26 +9,6 @@ from .solver import LIN, DNN, RNN
 from .utils import calc_cov_from_data, calc_pi_from_cov, make_non_pad_mask, pad_list, _context_concat
 import pdb
 
-def ortho_reg_fn(V, ortho_lambda):
-    """Regularization term which encourages the basis vectors in the
-    columns of V to be orthonormal.
-    Parameters
-    ----------
-    V : shape (hidden, fdim)
-        Projection layer.
-    ortho_lambda : float
-        Regularization hyperparameter.
-    Returns
-    -------
-    reg_val : float
-        Value of regularization function.
-    """
-
-    fdim = V.shape[1]
-    reg_val = ortho_lambda * torch.sum((torch.mm(V.t(), V) - torch.eye(fdim, device=V.device, dtype=V.dtype)) ** 2)
-
-    return reg_val
-
 
 def ortho_reg_Y(Y, src_mask):
     # Weiran: Y is of shape (B, maxlen, fdim).

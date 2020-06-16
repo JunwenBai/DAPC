@@ -5,6 +5,27 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from torch.nn.utils.rnn import pad_packed_sequence
 import logging
 
+# Weiran: moved this function here for now.
+def ortho_reg_fn(V, ortho_lambda):
+    """Regularization term which encourages the basis vectors in the
+    columns of V to be orthonormal.
+    Parameters
+    ----------
+    V : shape (hidden, fdim)
+        Projection layer.
+    ortho_lambda : float
+        Regularization hyperparameter.
+    Returns
+    -------
+    reg_val : float
+        Value of regularization function.
+    """
+
+    fdim = V.shape[1]
+    reg_val = ortho_lambda * torch.sum((torch.mm(V.t(), V) - torch.eye(fdim, device=V.device, dtype=V.dtype)) ** 2)
+
+    return reg_val
+
 
 class LIN(nn.Module):
 
