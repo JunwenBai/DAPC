@@ -127,7 +127,7 @@ if __name__ == "__main__":
         if use_gpu:
             device=torch.device("cuda:0")
         print("Training d-DCA")
-        ddca_model = DynamicalComponentsAnalysis(idim, fdim=3, T=T, encoder_type="lstm", block_toeplitz=False, ortho_lambda=ortho_lambda,
+        ddca_model = DynamicalComponentsAnalysis(idim, fdim=3, T=T, encoder_type="lin", block_toeplitz=False, ortho_lambda=ortho_lambda,
                    dropout=0.5, init="random_ortho")
         # Weiran: chunk long sequences to shorter ones.
         X_train_seqs, L_train = chunk_long_seq(X_noisy_train, 30, 500)
@@ -173,4 +173,4 @@ if __name__ == "__main__":
         ddca_recons.append(X_ddca_recon)
 
     plot_figs(dca_recons, ddca_recons, X_dyn_val_plot, X_clean_val_plot, X_noisy_val_plot, r2_vals, snr_vals, "DCA", "d-DCA",
-              "figs/fig1_T=%d_reg=%.2f.pdf" % (T, ortho_lambda))
+              "figs/result.pdf")

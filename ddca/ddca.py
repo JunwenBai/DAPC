@@ -5,7 +5,7 @@ import logging
 
 import torch
 
-from .solver import DNN, RNN
+from .solver import LIN, DNN, RNN
 from .utils import calc_cov_from_data, calc_pi_from_cov, make_non_pad_mask, pad_list
 import pdb
 
@@ -98,10 +98,13 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         else:
             self.rng = np.random.RandomState(rng_or_seed)
 
-        if self.encoder_type == "dnn":
-            self.encoder = DNN(self.idim, self.fdim, dropout=self.dropout)  # Dim reduction NN
-        else:  # ['lstm', 'gru', 'blstm', 'bgru']
-            self.encoder = RNN(idim=self.idim, elayers=1, cdim=64, hdim=self.fdim, dropout=self.dropout,
+        if self.encoder_type == "lin":
+            self.encoder = LIN(self.idim, self.fdim, dropout=self.dropout)
+        else:
+            if self.encoder_type == "dnn":
+                self.encoder = DNN(self.idim, self.fdim, dropout=self.dropout)  # Dim reduction NN
+            else:  # ['lstm', 'gru', 'blstm', 'bgru']
+                self.encoder = RNN(idim=self.idim, elayers=1, cdim=64, hdim=self.fdim, dropout=self.dropout,
                                typ=self.encoder_type)
 
     def forward(self, xs_pad, ilens):

@@ -6,6 +6,20 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from torch.nn.utils.rnn import pad_packed_sequence
 import logging
 
+
+class LIN(nn.Module):
+
+    def __init__(self, n_input, n_output, dropout=0.5):
+        super(LIN, self).__init__()
+        self.dropout = dropout
+        self.fc1 = nn.Linear(n_input, n_output)
+
+    def forward(self, x, mask):
+        x = F.dropout(x, p=self.dropout)
+        x = self.fc1(x)
+        return x, mask, None
+
+
 class DNN(nn.Module):
     
     def __init__(self, n_input, n_output, dropout=0.5, n_hid=512, use_sigmoid=False):
