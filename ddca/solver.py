@@ -95,6 +95,7 @@ class DNN(nn.Module):
         x = self.fc_out(x)
         return x, ilens, None
 
+
 class RNN(torch.nn.Module):
     """RNN module
     :param int idim: dimension of inputs
@@ -141,6 +142,7 @@ class RNN(torch.nn.Module):
             ys_pad.contiguous().view(-1, ys_pad.size(2))))
         xs_pad = projected.view(ys_pad.size(0), ys_pad.size(1), -1)
         return xs_pad, ilens, states  # x: utt list of frame x dim
+
 
 def reset_backward_rnn_state(states):
     """Sets backward BRNN states to zeroes - useful in processing of sliding windows over the inputs"""
