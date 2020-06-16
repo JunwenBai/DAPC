@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,30 +10,30 @@ class LIN(nn.Module):
 
     def __init__(self, n_input, n_output, dropout=0.5):
         super(LIN, self).__init__()
-        self.dropout = dropout
+        self.dropout = nn.Dropout(dropout)
         self.fc1 = nn.Linear(n_input, n_output)
 
-    def forward(self, x, mask):
-        x = F.dropout(x, p=self.dropout)
+    def forward(self, x, ilens):
+        x = self.dropout(x)
         x = self.fc1(x)
-        return x, mask, None
+        return x, ilens, None
 
 
 class DNN(nn.Module):
     
     def __init__(self, n_input, n_output, dropout=0.5, n_hid=512, use_sigmoid=False):
         super(DNN, self).__init__()
-        self.dropout = dropout
+        self.dropout = nn.Dropout(dropout)
         self.fc1 = nn.Linear(n_input, n_hid)
         self.fc2 = nn.Linear(n_hid, n_hid)
         self.fc3 = nn.Linear(n_hid, n_output)
         #self.lists = nn.ModuleList([self.fc1, self.fc2])
 
-    def forward(self, x, mask):
-        x = F.dropout(F.elu(self.fc1(x)), p=self.dropout)
-        x = F.dropout(F.elu(self.fc2(x)), p=self.dropout)
+    def forward(self, x, ilens):
+        x = self.dropout(F.elu(self.fc1(x)))
+        x = self.dropout(F.elu(self.fc2(x)))
         x = self.fc3(x)
-        return x, mask, None
+        return x, ilens, None
 
 class RNN(torch.nn.Module):
     """RNN module

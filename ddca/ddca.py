@@ -37,7 +37,7 @@ def ortho_reg_Y(Y, src_mask):
 
     Y = torch.reshape(Y, [-1, fdim])
     mask_float = src_mask.float().view([-1, 1])
-    Y_mean = torch.sum(torch.mul(Y, mask_float), 1, keepdim=True) / torch.sum(mask_float)
+    Y_mean = torch.sum(torch.mul(Y, mask_float), 0, keepdim=True) / torch.sum(mask_float)
     Y = Y - Y_mean
 
     cov = torch.mm(torch.mul(Y, mask_float).t(), Y) / torch.sum(mask_float)
@@ -213,3 +213,5 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False,
         writer.add_scalar('train/orth', avg_ortho_loss_train, epoch)
         writer.add_scalar('valid/pi', avg_pi_valid, epoch)
         writer.add_scalar('valid/orth', avg_ortho_loss_valid, epoch)
+    pdb.set_trace()
+    return model

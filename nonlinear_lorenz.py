@@ -104,11 +104,10 @@ if __name__ == "__main__":
     split_rate = 0.8
     snr_vals = [10.]  # signal-to-noise ratios
     num_samples = 10000  # samples to collect from the lorenz system
-    num_plot = 500
 
     print("Generating ground truth dynamics ...")
     X_dynamics = gen_lorenz_data(num_samples)  # 10000 * 3
-    noisy_model = DNN(X_dynamics.shape[1], idim)  # DNN lift projection: 3 -> 30 for d-DCA
+    noisy_model = Match_DNN(X_dynamics.shape[1], idim)  # DNN lift projection: 3 -> 30 for d-DCA
 
     dca_recons = []
     ddca_recons = []
@@ -132,13 +131,20 @@ if __name__ == "__main__":
         ddca_model = DynamicalComponentsAnalysis(idim, fdim=3, T=T, encoder_type="lin", block_toeplitz=False,
                                                  ortho_lambda=ortho_lambda,
                                                  dropout=0.5, init="random_ortho")
+
         # Weiran: chunk long sequences to shorter ones.
-        X_train_seqs, L_train = chunk_long_seq(X_noisy_train, 30, 500)
-        X_valid_seqs, L_valid = chunk_long_seq(X_noisy_val, 30, 500)
-        fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs, L_valid, writer, use_gpu, batch_size=20, max_epochs=50)
+        chunk_size = 500
+        X_train_seqs, L_train = chunk_long_seq(X_noisy_train, 30, chunk_size)
+        X_valid_seqs, L_valid = chunk_long_seq(X_noisy_val, 30, chunk_size)
+        X_clean_seqs, L_clean = chunk_long_seq(X_clean_val, 30, chunk_size)
+        X_dyn_seqs, L_dyn = chunk_long_seq(X_dyn_val, 30, chunk_size)
+
+        ddca_model = fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, use_gpu, batch_size=10, max_epochs=50)
 
         X_ddca = ddca_model.encode(
-            torch.from_numpy(X_noisy_val[:num_plot, :]).float().to(device, dtype=ddca_model.dtype)).cpu()
+            torch.from_numpy(X_valid_seqs[0]).float().to(device, dtype=ddca_model.dtype)).cpu()
+        print(X_ddca)
+        print(torch.mm((X_ddca - X_ddca.mean(0, keepdim=True)).t(), (X_ddca - X_ddca.mean(0, keepdim=True))) / X_ddca.size(0))
         # X_ddca = smoothen(X_ddca)
 
         # Linear DCA
@@ -148,31 +154,26 @@ if __name__ == "__main__":
         opt.fit(X_noisy_train, X_noisy_val, X_dyn_val, writer)
         V_dca = opt.coef_  # transformation matrix
         X_dca = np.dot(X_noisy_val, V_dca)  # recontructed 3-d signals: X_dca
-        X_dca = X_dca[:num_plot, :]
+        X_dca = X_dca[:chunk_size, :]
         # X_dca = smoothen(X_dca)
 
-        # match DCA with ground-truth
-        X_dyn_val_plot = X_dyn_val[:num_plot, :]
-        X_clean_val_plot = X_clean_val[:num_plot, :]
-        X_noisy_val_plot = X_noisy_val[:num_plot, :]
-
         print("Matching DCA")
-        X_dca_recon = match(X_dca, X_dyn_val_plot, 15000, device)
+        X_dca_recon = match(X_dca, X_dyn_seqs[0], 15000, device)
         # match d-DCA with ground-truth
         print("Matching d-DCA")
-        X_ddca_recon = match(X_ddca.detach().cpu().numpy(), X_dyn_val_plot, 15000, device)
+        X_ddca_recon = match(X_ddca.detach().cpu().numpy(), X_dyn_seqs[0], 15000, device)
 
         # R2 of dca
-        r2_dca = 1 - np.sum((X_dca_recon - X_dyn_val_plot) ** 2) / np.sum(
-            (X_dyn_val_plot - np.mean(X_dyn_val_plot, axis=0)) ** 2)
+        r2_dca = 1 - np.sum((X_dca_recon - X_dyn_seqs[0]) ** 2) / np.sum(
+            (X_dyn_seqs[0] - np.mean(X_dyn_seqs[0], axis=0)) ** 2)
         # R2 of ddca
-        r2_ddca = 1 - np.sum((X_ddca_recon - X_dyn_val_plot) ** 2) / np.sum(
-            (X_dyn_val_plot - np.mean(X_dyn_val_plot, axis=0)) ** 2)
+        r2_ddca = 1 - np.sum((X_ddca_recon - X_dyn_seqs[0]) ** 2) / np.sum(
+            (X_dyn_seqs[0] - np.mean(X_dyn_seqs[0], axis=0)) ** 2)
         # store R2's
         r2_vals[snr_idx] = [r2_dca, r2_ddca]
         # store reconstructed signals    
         dca_recons.append(X_dca_recon)
         ddca_recons.append(X_ddca_recon)
 
-    plot_figs(dca_recons, ddca_recons, X_dyn_val_plot, X_clean_val_plot, X_noisy_val_plot, r2_vals, snr_vals, "DCA",
+    plot_figs(dca_recons, ddca_recons, X_dyn_seqs[0], X_clean_seqs[0], X_valid_seqs[0], r2_vals, snr_vals, "DCA",
               "d-DCA", "figs/result.pdf")
