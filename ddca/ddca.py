@@ -24,6 +24,15 @@ def ortho_reg_Y(Y, src_mask):
     return torch.sum((cov - I) ** 2), cov
 
 
+def compute_recon_mse(recon, X, src_mask):
+    # Weiran: recon and X are of shape (B, maxlen, fdim).
+    idim = X.size(2)
+
+    loss = torch.sum( (recon.view([-1,idim]) - X.view([-1,idim])) ** 2, 1)
+    mask_float = src_mask.float().view([-1])
+    return torch.sum(torch.mul(loss, mask_float)) / torch.sum(mask_float)
+
+
 class DynamicalComponentsAnalysis(torch.nn.Module):
     """Dynamical Components Analysis.
 
@@ -41,9 +50,6 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         Size of time windows across which to compute mutual information. Total window length will be
         `2 * T`. When fitting a model, the length of the shortest time series must be greater than
         `2 * T` and for good performance should be much greater than `2 * T`.
-    init : str
-        Options: "random_ortho", "random", or "PCA"
-        Method for initializing the projection matrix.
     ortho_lambda : float
         Coefficient on term that keeps V close to orthonormal.
     block_toeplitz : bool
@@ -53,15 +59,15 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         What dtype to use for computation.
     """
 
-    def __init__(self, idim, fdim, T, ortho_lambda=0.0, input_context=0,
+    def __init__(self, idim, fdim, T, input_context=0, recon_lambda=0.0, ortho_lambda=0.0,
                  encoder_type="dnn", block_toeplitz=True, diag_reg=1e-6, dropout=0.5,
-                 dtype=torch.float32, rng_or_seed=None, init="random_ortho"):
+                 dtype=torch.float32, rng_or_seed=None):
         super(DynamicalComponentsAnalysis, self).__init__()
         self.input_context = input_context
         self.idim = idim * (1+2*input_context)
         self.fdim = fdim
         self.T = T
-        self.init = init
+        self.recon_lambda = recon_lambda
         self.ortho_lambda = ortho_lambda
         self.dropout = dropout
         self.encoder_type = encoder_type
@@ -86,6 +92,12 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                 self.encoder = RNN(idim=self.idim, elayers=3, cdim=128, hdim=self.fdim, dropout=self.dropout,
                                typ=self.encoder_type)
 
+        # Weiran: based on my experience, reconstruction network would better be a DNN than RNNs.
+        if self.recon_lambda > 0:
+            self.decoder = DNN(self.fdim, self.idim, n_hid=128, dropout=self.dropout)
+        else:
+            self.decoder = None
+
     def forward(self, xs_pad, ilens):
         """ forward.
 
@@ -109,9 +121,14 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
 
         pi = calc_pi_from_cov(self.cov)
         ortho_loss, self.cov_frame = ortho_reg_Y(hs_pad, hmask)
-        self.loss = - pi + self.ortho_lambda * ortho_loss
 
-        return self.loss, float(pi), float(ortho_loss), (self.cov_frame).detach().cpu().numpy()
+        if self.decoder:
+            recon, _, _ = self.decoder(hs_pad, olens)
+            recon_loss = compute_recon_mse(recon, xs_pad, hmask)
+        else:
+            recon_loss = 0.0
+        self.loss = - pi + self.ortho_lambda * ortho_loss + self.recon_lambda * recon_loss
+        return self.loss, float(pi), float(ortho_loss), recon_loss, (self.cov_frame).detach().cpu().numpy()
 
 
     def encode(self, x):
@@ -143,56 +160,69 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False,
     for epoch in range(max_epochs):
         model.train()
         order = np.random.permutation(n_train)
-        tot_pi = 0.0
-        tot_ortho_loss = 0.0
+        total_pi = 0.0
+        total_ortho_loss = 0.0
+        total_loss_recon = 0.0
+        
         for i in range(n_batch_train):
             idx_batch = list(order[i * batch_size: min((i + 1) * batch_size, n_train)])
 
             x_batch = [torch.from_numpy(_context_concat(X_train[_], input_context)).float() for _ in idx_batch]
             l_batch = [L_train[_] for _ in idx_batch]
+            total_len_batch = sum(l_batch)
             x_batch, l_batch = pad_list(x_batch, 0.0).to(device), torch.Tensor(l_batch).long().to(device)
 
             optimizer.zero_grad()
-            loss, pi, loss_orth, _ = model(x_batch, l_batch)
+            loss, pi, loss_orth, loss_recon, _ = model(x_batch, l_batch)
             #print("minibatch %03d/%03d: pi=%f" % (i, n_batch_train, pi))
             loss.backward()
             loss.detach()
             optimizer.step()
 
-            tot_pi += pi
-            tot_ortho_loss += loss_orth
+            total_pi += pi
+            total_ortho_loss += loss_orth
+            total_loss_recon += loss_recon * total_len_batch
 
-        avg_pi_train = tot_pi / n_batch_train
-        avg_ortho_loss_train = tot_ortho_loss / n_batch_train
-        print("epoch %d, train avg pi=%f, ortho_loss=%f" % (epoch, avg_pi_train, avg_ortho_loss_train))
+        avg_pi_train = total_pi / n_batch_train
+        avg_ortho_loss_train = total_ortho_loss / n_batch_train
+        avg_recon_loss_train = total_loss_recon / sum(L_train)
+        print("epoch %d, train avg pi=%f, ortho_loss=%f, recon_loss=%f" %
+              (epoch, avg_pi_train, avg_ortho_loss_train, avg_recon_loss_train))
 
         model.eval()
-        tot_pi = 0.0
-        tot_ortho_loss = 0.0
-        tot_cov_frame = np.zeros([model.fdim, model.fdim])
+        total_pi = 0.0
+        total_ortho_loss = 0.0
+        total_recon_loss = 0.0
+        total_cov_frame = np.zeros([model.fdim, model.fdim])
         for i in range(int(math.ceil(n_valid / batch_size))):
             x_batch = [torch.from_numpy(_context_concat(X_valid[_],input_context)).float() for _ in range(i*batch_size, min((i+1)*batch_size, n_valid))]
             l_batch = [L_valid[_] for _ in range(i*batch_size, min((i+1)*batch_size, n_valid))]
             total_len_batch = sum(l_batch)
             x_batch, l_batch = pad_list(x_batch, 0.0).to(device), torch.Tensor(l_batch).long().to(device)
 
-            _, pi, loss_orth, cov_frame = model(x_batch, l_batch)
+            _, pi, loss_orth, loss_recon, cov_frame = model(x_batch, l_batch)
             #print("minibatch %03d/%03d: pi=%f" % (i, n_batch_valid, pi))
 
-            tot_pi += pi
-            tot_ortho_loss += loss_orth
-            tot_cov_frame += cov_frame * total_len_batch
+            total_pi += pi
+            total_ortho_loss += loss_orth
+            total_loss_recon += loss_recon * total_len_batch
+            total_cov_frame += cov_frame * total_len_batch
 
-        avg_pi_valid = tot_pi / n_batch_valid
-        avg_ortho_loss_valid = tot_ortho_loss / n_batch_valid
-        avg_cov_frame = tot_cov_frame / sum(L_valid)
-        print("epoch %d, valid avg pi=%f, ortho_loss=%f" % (epoch, avg_pi_valid, avg_ortho_loss_valid))
+
+        avg_pi_valid = total_pi / n_batch_valid
+        avg_ortho_loss_valid = total_ortho_loss / n_batch_valid
+        avg_recon_loss_valid = total_recon_loss / sum(L_valid)
+        avg_cov_frame = total_cov_frame / sum(L_valid)
+        print("epoch %d, valid avg pi=%f, ortho_loss=%f, recon_loss=%f" %
+              (epoch, avg_pi_valid, avg_ortho_loss_valid, avg_recon_loss_valid))
         print(avg_cov_frame)
 
         # Write stats.
         writer.add_scalar('train/pi', avg_pi_train, epoch)
         writer.add_scalar('train/orth', avg_ortho_loss_train, epoch)
+        writer.add_scalar('train/recon', avg_recon_loss_train, epoch)
         writer.add_scalar('valid/pi', avg_pi_valid, epoch)
         writer.add_scalar('valid/orth', avg_ortho_loss_valid, epoch)
+        writer.add_scalar('valid/recon', avg_recon_loss_valid, epoch)
 
     return model

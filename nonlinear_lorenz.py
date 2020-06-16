@@ -24,7 +24,8 @@ import argparse
 parser=argparse.ArgumentParser()
 parser.add_argument("--fdim", default=3, help="Dimensionality of features", type=int)
 parser.add_argument("--T", default=4, help="Time steps for estimating PI", type=int)
-parser.add_argument("--ortho_lambda", default=10.0, help="Regularization parameter", type=float)
+parser.add_argument("--ortho_lambda", default=10.0, help="Regularization parameter for orthogonality", type=float)
+parser.add_argument("--recon_lambda", default=10.0, help="Regularization parameter for reconstruction", type=float)
 parser.add_argument("--dropout", default=0.0, help="Dropout probability of networks.", type=float)
 parser.add_argument("--batchsize", default=20, help="Number of sequences in each minibatch for unsupervised loss", type=int)
 parser.add_argument("--encoder_type", default="lin", type=str, choices=["lin", "dnn", "gru", "lstm", "bgru", "blstm"])
@@ -170,8 +171,8 @@ if __name__ == "__main__":
         print("Training d-DCA")
         ddca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type=args.encoder_type,
                                                  input_context=args.input_context,
-                                                 ortho_lambda=args.ortho_lambda, block_toeplitz=False,
-                                                 dropout=args.dropout, init="random_ortho")
+                                                 ortho_lambda=args.ortho_lambda, recon_lambda=args.recon_lambda,
+                                                 dropout=args.dropout, block_toeplitz=False)
 
         # Weiran: chunk long sequences to shorter ones.
         chunk_size = 500
@@ -204,7 +205,7 @@ if __name__ == "__main__":
         dca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type="lin",
                                                  input_context=args.input_context,
                                                  ortho_lambda=10.0, block_toeplitz=False,
-                                                 dropout=0.0, init="random_ortho")
+                                                 dropout=0.0)
         dca_model = fit_ddca(dca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, use_gpu,
                               batch_size=args.batchsize, max_epochs=args.epochs)
 
