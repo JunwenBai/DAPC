@@ -203,7 +203,7 @@ if __name__ == "__main__":
 
         dca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type="lin",
                                                  input_context=args.input_context,
-                                                 ortho_lambda=args.ortho_lambda, block_toeplitz=False,
+                                                 ortho_lambda=10.0, block_toeplitz=False,
                                                  dropout=0.0, init="random_ortho")
         dca_model = fit_ddca(dca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, use_gpu,
                               batch_size=args.batchsize, max_epochs=args.epochs)
