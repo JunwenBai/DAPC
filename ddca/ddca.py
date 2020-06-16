@@ -205,7 +205,6 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False,
 
             total_pi += pi
             total_ortho_loss += loss_orth
-            print(loss_recon)
             total_loss_recon += loss_recon * total_len_batch
             total_cov_frame += cov_frame * total_len_batch
 
