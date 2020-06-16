@@ -5,6 +5,31 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from torch.nn.utils.rnn import pad_packed_sequence
 import logging
 
+class KERNEL(nn.Module):
+
+    def __init__(self, centers, sigmas):
+        super(KERNEL, self).__init__()
+        self.C = centers.shape[0]
+        self.S = len(sigmas)
+        self.centers = centers
+        self.sigmas = sigmas
+        self.list = nn.ModuleList([torch.nn.Linear(self.C, 1) for _ in range(self.S)])
+        self.reset_parameters()
+
+    def reset_parameters(self, stdv=1.0):
+        for layer in self.list:
+            layer.weight.data.normal_(stdv)
+            if layer.bias is not None:
+                layer.bias.data.normal_(stdv)
+
+    def forward(self, x):
+        diff = x.unsqueeze(1) - torch.tensor(self.centers, dtype=x.dtype).unsqueeze(0)
+        # N x C matrix.
+        sqdist = torch.sum(diff ** 2, 2)
+        # N x S x C tensor.
+        aff = torch.exp(- sqdist.unsqueeze(1) / torch.reshape(torch.tensor(self.sigmas, dtype=sqdist.dtype), [1, -1, 1]))
+        return torch.cat([self.list[i](aff[:,i,:]) for i in range(self.S)], 1)
+
 
 class LIN(nn.Module):
 
@@ -21,18 +46,30 @@ class LIN(nn.Module):
 
 class DNN(nn.Module):
     
-    def __init__(self, n_input, n_output, dropout=0.5, n_hid=512):
+    def __init__(self, n_input, n_output, dropout=0.5, h_sizes=[128, 128], reset_param=False):
         super(DNN, self).__init__()
         self.dropout = nn.Dropout(dropout)
-        self.fc1 = nn.Linear(n_input, n_hid)
-        self.fc2 = nn.Linear(n_hid, n_hid)
-        self.fc3 = nn.Linear(n_hid, n_output)
-        #self.lists = nn.ModuleList([self.fc1, self.fc2])
+        self.fc_in = nn.Linear(n_input, h_sizes[0])
+        self.hidden = nn.ModuleList([self.fc_in])
+        self.n_layers = len(h_sizes)
+        for i in range(1, self.n_layers):
+            self.hidden.append(nn.Linear(h_sizes[i-1], h_sizes[i]))
+        self.fc_out = nn.Linear(h_sizes[-1], n_output)
+        if reset_param:
+            self.reset_parameters()
+        
+    def reset_parameters(self):
+        for layer in self.hidden:
+            stdv = 1. / math.sqrt(layer.weight.size(1))
+            # stdv = 0.5
+            layer.weight.data.normal_(stdv)
+            if layer.bias is not None:
+                layer.bias.data.normal_(stdv)    
 
     def forward(self, x, ilens):
-        x = self.dropout(F.elu(self.fc1(x)))
-        x = self.dropout(F.elu(self.fc2(x)))
-        x = self.fc3(x)
+        for fc in self.hidden:
+            x = self.dropout(F.elu(fc(x)))
+        x = self.fc_out(x)
         return x, ilens, None
 
 class RNN(torch.nn.Module):
