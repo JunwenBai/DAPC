@@ -16,11 +16,11 @@ class DNN(nn.Module):
         self.fc3 = nn.Linear(n_hid, n_output)
         #self.lists = nn.ModuleList([self.fc1, self.fc2])
 
-    def forward(self, x):
+    def forward(self, x, mask):
         x = F.dropout(F.elu(self.fc1(x)), p=self.dropout)
         x = F.dropout(F.elu(self.fc2(x)), p=self.dropout)
         x = self.fc3(x)
-        return x
+        return x, mask, None
 
 class RNN(torch.nn.Module):
     """RNN module

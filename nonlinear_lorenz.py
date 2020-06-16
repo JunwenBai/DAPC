@@ -103,6 +103,7 @@ if __name__ == "__main__":
     split_rate = 0.8
     snr_vals = [10.]  # signal-to-noise ratios
     num_samples = 10000  # samples to collect from the lorenz system
+    num_plot = 500
 
     print("Generating ground truth dynamics ...")
     X_dynamics = gen_lorenz_data(num_samples)  # 10000 * 3
@@ -126,15 +127,15 @@ if __name__ == "__main__":
         if use_gpu:
             device=torch.device("cuda:0")
         print("Training d-DCA")
-        ddca_model = DynamicalComponentsAnalysis(idim, fdim=3, T=T, encoder_type="gru", block_toeplitz=False, ortho_lambda=ortho_lambda,
+        ddca_model = DynamicalComponentsAnalysis(idim, fdim=3, T=T, encoder_type="lstm", block_toeplitz=False, ortho_lambda=ortho_lambda,
                    dropout=0.5, init="random_ortho")
         # Weiran: chunk long sequences to shorter ones.
         X_train_seqs, L_train = chunk_long_seq(X_noisy_train, 30, 500)
         X_valid_seqs, L_valid = chunk_long_seq(X_noisy_val, 30, 500)
         fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs, L_valid, writer,
                           use_gpu, batch_size=20, max_epochs=50)
-        pdb.set_trace()
-        X_ddca = ddca_model.encode(torch.from_numpy(X_noisy_val[:500,:]).to(device))
+
+        X_ddca = ddca_model.encode(torch.from_numpy(X_noisy_val[:num_plot, :]).float().to(device, dtype=ddca_model.dtype)).cpu()
         # print("X_ddca:", X_ddca.shape)
         # ddca_model = opt.model
         # X_ddca = ddca_model(torch.Tensor(X_noisy_val)).detach().cpu().numpy() # reconstruct 3-d signals: X_ddca
@@ -147,24 +148,29 @@ if __name__ == "__main__":
         opt.fit(X_noisy_train, X_noisy_val, X_dyn_val, writer)
         V_dca = opt.coef_  # transformation matrix
         X_dca = np.dot(X_noisy_val, V_dca)  # recontructed 3-d signals: X_dca
+        X_dca = X_dca[:num_plot, :]
         # X_dca = smoothen(X_dca)
 
         # match DCA with ground-truth
+        X_dyn_val_plot = X_dyn_val[:num_plot, :]
+        X_clean_val_plot = X_clean_val[:num_plot, :]
+        X_noisy_val_plot = X_noisy_val[:num_plot, :]
+
         print("Matching DCA")
-        X_dca_recon = match(X_dca, X_dyn_val, 15000)
+        X_dca_recon = match(X_dca, X_dyn_val_plot, 15000)
         # match d-DCA with ground-truth
         print("Matching d-DCA")
-        X_ddca_recon = match(X_ddca.detach().cpu(), X_dyn_val, 15000)
+        X_ddca_recon = match(X_ddca.detach().cpu(), X_dyn_val_plot, 15000)
 
         # R2 of dca
-        r2_dca = 1 - np.sum((X_dca_recon - X_dyn_val) ** 2) / np.sum((X_dyn_val - np.mean(X_dyn_val, axis=0)) ** 2)
+        r2_dca = 1 - np.sum((X_dca_recon - X_dyn_val_plot) ** 2) / np.sum((X_dyn_val_plot - np.mean(X_dyn_val_plot, axis=0)) ** 2)
         # R2 of ddca
-        r2_ddca = 1 - np.sum((X_ddca_recon - X_dyn_val) ** 2) / np.sum((X_dyn_val - np.mean(X_dyn_val, axis=0)) ** 2)
+        r2_ddca = 1 - np.sum((X_ddca_recon - X_dyn_val_plot) ** 2) / np.sum((X_dyn_val_plot - np.mean(X_dyn_val_plot, axis=0)) ** 2)
         # store R2's
         r2_vals[snr_idx] = [r2_dca, r2_ddca]
         # store reconstructed signals    
         dca_recons.append(X_dca_recon)
         ddca_recons.append(X_ddca_recon)
 
-    plot_figs(dca_recons, ddca_recons, X_dyn_val, X_clean_val, X_noisy_val, r2_vals, snr_vals, "DCA", "d-DCA",
-              "figs/fig1_T=%d_reg=%.2f.pdf".format(T, ortho_lambda))
+    plot_figs(dca_recons, ddca_recons, X_dyn_val_plot, X_clean_val_plot, X_noisy_val_plot, r2_vals, snr_vals, "DCA", "d-DCA",
+              "figs/fig1_T=%d_reg=%.2f.pdf" % (T, ortho_lambda))

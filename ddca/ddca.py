@@ -101,7 +101,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         if self.encoder_type == "dnn":
             self.encoder = DNN(self.idim, self.fdim, dropout=self.dropout)  # Dim reduction NN
         else:  # ['lstm', 'gru', 'blstm', 'bgru']
-            self.encoder = RNN(idim=self.idim, elayers=3, cdim=128, hdim=self.fdim, dropout=self.dropout,
+            self.encoder = RNN(idim=self.idim, elayers=1, cdim=64, hdim=self.fdim, dropout=self.dropout,
                                typ=self.encoder_type)
 
     def forward(self, xs_pad, ilens):
