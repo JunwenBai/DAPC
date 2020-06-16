@@ -8,7 +8,7 @@ import logging
 
 class LIN(nn.Module):
 
-    def __init__(self, n_input, n_output, dropout=0.5):
+    def __init__(self, n_input, n_output, dropout=0.0):
         super(LIN, self).__init__()
         self.dropout = nn.Dropout(dropout)
         self.fc1 = nn.Linear(n_input, n_output)
@@ -21,7 +21,7 @@ class LIN(nn.Module):
 
 class DNN(nn.Module):
     
-    def __init__(self, n_input, n_output, dropout=0.5, n_hid=512, use_sigmoid=False):
+    def __init__(self, n_input, n_output, dropout=0.5, n_hid=512):
         super(DNN, self).__init__()
         self.dropout = nn.Dropout(dropout)
         self.fc1 = nn.Linear(n_input, n_hid)

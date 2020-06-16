@@ -361,3 +361,30 @@ def make_non_pad_mask(lengths, xs=None, length_dim=-1):
 
     """
     return ~make_pad_mask(lengths, xs, length_dim)
+
+
+def _context_concat(seq, context_size=0):
+    """ seq is of size length x feat_dim.
+    output is of size length x (feat_dim*(1+2*context_size)).
+    """
+
+    if context_size == 0:
+        return seq
+
+    output = []
+    length = seq.shape[0]
+    # Left concatenation.
+    for j in range(context_size):
+        tmp = np.concatenate([np.repeat(seq[np.newaxis, 0, :], j + 1, axis=0), seq[0:(length - j - 1), :]], 0)
+        output.append(tmp)
+
+    # Add original inputs.
+    output.append(seq)
+
+    # Right concatenation.
+    for j in range(context_size):
+        tmp = np.concatenate([seq[(j + 1):length, :],
+                              np.repeat(seq[np.newaxis, length - 1, :], j + 1, axis=0)], 0)
+        output.append(tmp)
+
+    return np.concatenate(output, 1)

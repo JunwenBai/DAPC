@@ -10,7 +10,7 @@ torch.manual_seed(seed)
 
 class DNN(nn.Module):
     
-    def __init__(self, n_input, n_output, n_hid=16, use_sigmoid=False):
+    def __init__(self, n_input, n_output, n_hid=128, use_sigmoid=False):
         super(DNN, self).__init__()
         self.fc1 = nn.Linear(n_input, n_hid)
         self.fc2 = nn.Linear(n_hid, n_hid)
@@ -21,7 +21,7 @@ class DNN(nn.Module):
     def reset_parameters(self):
         for layer in self.lists:
             stdv = 1. / math.sqrt(layer.weight.size(1))
-            stdv = 0.5
+            # stdv = 0.5
             layer.weight.data.normal_(stdv)
             if layer.bias is not None:
                 layer.bias.data.normal_(stdv)

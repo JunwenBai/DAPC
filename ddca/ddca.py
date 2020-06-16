@@ -6,7 +6,7 @@ import logging
 import torch
 
 from .solver import LIN, DNN, RNN
-from .utils import calc_cov_from_data, calc_pi_from_cov, make_non_pad_mask, pad_list
+from .utils import calc_cov_from_data, calc_pi_from_cov, make_non_pad_mask, pad_list, _context_concat
 import pdb
 
 def ortho_reg_fn(V, ortho_lambda):
@@ -73,13 +73,12 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         What dtype to use for computation.
     """
 
-    def __init__(self, idim, fdim, T, ortho_lambda=0.0,
+    def __init__(self, idim, fdim, T, ortho_lambda=0.0, input_context=0,
                  encoder_type="dnn", block_toeplitz=True, diag_reg=1e-6, dropout=0.5,
                  dtype=torch.float32, rng_or_seed=None, init="random_ortho"):
         super(DynamicalComponentsAnalysis, self).__init__()
-        # Weiran: fdim and T are essential model parameters, must specify.
-        # As a consequence, the class members shall directly refer to them, instead of passing in arguments.
-        self.idim = idim
+        self.input_context = input_context
+        self.idim = idim * (1+2*input_context)
         self.fdim = fdim
         self.T = T
         self.init = init
@@ -102,9 +101,9 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             self.encoder = LIN(self.idim, self.fdim, dropout=self.dropout)
         else:
             if self.encoder_type == "dnn":
-                self.encoder = DNN(self.idim, self.fdim, dropout=self.dropout)  # Dim reduction NN
+                self.encoder = DNN(self.idim, self.fdim, n_hid=128, dropout=self.dropout)  # Dim reduction NN
             else:  # ['lstm', 'gru', 'blstm', 'bgru']
-                self.encoder = RNN(idim=self.idim, elayers=1, cdim=64, hdim=self.fdim, dropout=self.dropout,
+                self.encoder = RNN(idim=self.idim, elayers=3, cdim=128, hdim=self.fdim, dropout=self.dropout,
                                typ=self.encoder_type)
 
     def forward(self, xs_pad, ilens):
@@ -152,6 +151,7 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False,
     device = torch.device("cuda" if use_gpu else "cpu")
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    input_context = model.input_context
 
     # X_train is a sequence of input sequences, whose lengths are saved in L_train.
     # The proper way is to write a data loader to get next batch.
@@ -167,7 +167,8 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False,
         tot_ortho_loss = 0.0
         for i in range(n_batch_train):
             idx_batch = list(order[i * batch_size: min((i + 1) * batch_size, n_train)])
-            x_batch = [torch.from_numpy(X_train[_]).float() for _ in idx_batch]
+
+            x_batch = [torch.from_numpy(_context_concat(X_train[_], input_context)).float() for _ in idx_batch]
             l_batch = [L_train[_] for _ in idx_batch]
             x_batch, l_batch = pad_list(x_batch, 0.0).to(device), torch.Tensor(l_batch).long().to(device)
 
@@ -190,7 +191,7 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False,
         tot_ortho_loss = 0.0
         tot_cov_frame = np.zeros([model.fdim, model.fdim])
         for i in range(int(math.ceil(n_valid / batch_size))):
-            x_batch = [torch.from_numpy(X_valid[_]).float() for _ in range(i*batch_size, min((i+1)*batch_size, n_valid))]
+            x_batch = [torch.from_numpy(_context_concat(X_valid[_],input_context)).float() for _ in range(i*batch_size, min((i+1)*batch_size, n_valid))]
             l_batch = [L_valid[_] for _ in range(i*batch_size, min((i+1)*batch_size, n_valid))]
             total_len_batch = sum(l_batch)
             x_batch, l_batch = pad_list(x_batch, 0.0).to(device), torch.Tensor(l_batch).long().to(device)
@@ -213,5 +214,5 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False,
         writer.add_scalar('train/orth', avg_ortho_loss_train, epoch)
         writer.add_scalar('valid/pi', avg_pi_valid, epoch)
         writer.add_scalar('valid/orth', avg_ortho_loss_valid, epoch)
-    pdb.set_trace()
+
     return model

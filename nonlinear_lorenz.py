@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 
 from ddca.ddca import DynamicalComponentsAnalysis
 from ddca.ddca import fit_ddca
+from ddca.utils import _context_concat
 from ddca.data_gen import gen_nonlinear_noisy_lorenz, gen_lorenz_data
 from models.DNN import DNN, Match_DNN
 from plotter import plot_figs
@@ -17,6 +18,46 @@ from dca import DynamicalComponentsAnalysis as DCA
 import torch
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
+
+
+import argparse
+parser=argparse.ArgumentParser()
+parser.add_argument("--fdim", default=3, help="Dimensionality of features", type=int)
+parser.add_argument("--T", default=4, help="Time steps for estimating PI", type=int)
+parser.add_argument("--ortho_lambda", default=10.0, help="Regularization parameter", type=float)
+parser.add_argument("--dropout", default=0.0, help="Dropout probability of networks.", type=float)
+parser.add_argument("--batchsize", default=20, help="Number of sequences in each minibatch for unsupervised loss", type=int)
+parser.add_argument("--encoder_type", default="lin", type=str, choices=["lin", "dnn", "gru", "lstm", "bgru", "blstm"])
+parser.add_argument("--epochs", default=20, help="Number of training epochs", type=int)
+parser.add_argument("--input_context", default=0, help="Number of context frames for splicing", type=int)
+parser.add_argument("--seed", default=0, help="Random seed", type=int)
+args = parser.parse_args()
+
+import torch.nn as nn
+class KERNEL(nn.Module):
+
+    def __init__(self, centers, sigmas):
+        super(KERNEL, self).__init__()
+        self.C = centers.shape[0]
+        self.S = len(sigmas)
+        self.centers = centers
+        self.sigmas = sigmas
+        self.list = nn.ModuleList([torch.nn.Linear(self.C, 1) for _ in range(self.S)])
+        self.reset_parameters()
+
+    def reset_parameters(self, stdv=1.0):
+        for layer in self.list:
+            layer.weight.data.normal_(stdv)
+            if layer.bias is not None:
+                layer.bias.data.normal_(stdv)
+
+    def forward(self, x):
+        diff = x.unsqueeze(1) - torch.tensor(self.centers, dtype=x.dtype).unsqueeze(0)
+        # N x C matrix.
+        sqdist = torch.sum(diff ** 2, 2)
+        # N x S x C tensor.
+        aff = torch.exp(- sqdist.unsqueeze(1) / torch.reshape(torch.tensor(self.sigmas, dtype=sqdist.dtype), [1, -1, 1]))
+        return torch.cat([self.list[i](aff[:,i,:]) for i in range(self.S)], 1)
 
 def smoothen(raw_xs, window_len=12, window='hamming'):
     xs = raw_xs.T
@@ -87,17 +128,14 @@ def chunk_long_seq(X, step, sublen=500):
 
 
 if __name__ == "__main__":
-    # Set parameters
-    T = int(sys.argv[1])  # time window
-    ortho_lambda = float(sys.argv[2])
-    if len(sys.argv) > 3:
-        seed = int(sys.argv[3])
-    else:
-        seed = 0
 
-    np.random.seed(seed)  # fix the seed
-    torch.manual_seed(seed)  # fix the seed
-    torch.cuda.manual_seed(seed)
+    np.random.seed(args.seed)  # fix the seed
+    torch.manual_seed(args.seed)  # fix the seed
+    torch.cuda.manual_seed(args.seed)
+
+    T = args.T
+    fdim = args.fdim
+    dropout = args.dropout
 
     idim = 30  # lift projection dim
     noise_dim = 7  # noisify raw DCA
@@ -107,7 +145,9 @@ if __name__ == "__main__":
 
     print("Generating ground truth dynamics ...")
     X_dynamics = gen_lorenz_data(num_samples)  # 10000 * 3
-    noisy_model = Match_DNN(X_dynamics.shape[1], idim)  # DNN lift projection: 3 -> 30 for d-DCA
+    # noisy_model = DNN(X_dynamics.shape[1], idim)  # DNN lift projection: 3 -> 30 for d-DCA
+    # pdb.set_trace()
+    noisy_model = KERNEL(X_dynamics[::50], np.arange(0.05, 0.34, 0.01))
 
     dca_recons = []
     ddca_recons = []
@@ -115,22 +155,23 @@ if __name__ == "__main__":
     for snr_idx, snr in enumerate(snr_vals):
         print("Generating noisy data with snr=%.2f ..." % snr)
         X_clean, X_noisy = gen_nonlinear_noisy_lorenz(idim, T, snr, X_dynamics=X_dynamics, noisy_model=noisy_model,
-                                                      seed=seed)
+                                                      seed=args.seed)
         X_noisy = X_noisy - X_noisy.mean(axis=0)
 
         X_clean_train, X_clean_val = split(X_clean, split_rate)
         X_noisy_train, X_noisy_val = split(X_noisy, split_rate)
         X_dyn_train, X_dyn_val = split(X_dynamics, split_rate)
-        writer = SummaryWriter('runs/ddca_T=%d_reg=%.2f' % (T, ortho_lambda))
+        writer = SummaryWriter('runs/ddca_T=%d_reg=%.2f' % (T, args.ortho_lambda))
 
         # deep DCA
         use_gpu = True
         if use_gpu:
             device = torch.device("cuda:0")
         print("Training d-DCA")
-        ddca_model = DynamicalComponentsAnalysis(idim, fdim=3, T=T, encoder_type="lin", block_toeplitz=False,
-                                                 ortho_lambda=ortho_lambda,
-                                                 dropout=0.5, init="random_ortho")
+        ddca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type=args.encoder_type,
+                                                 input_context=args.input_context,
+                                                 ortho_lambda=args.ortho_lambda, block_toeplitz=False,
+                                                 dropout=args.dropout, init="random_ortho")
 
         # Weiran: chunk long sequences to shorter ones.
         chunk_size = 500
@@ -139,16 +180,18 @@ if __name__ == "__main__":
         X_clean_seqs, L_clean = chunk_long_seq(X_clean_val, 30, chunk_size)
         X_dyn_seqs, L_dyn = chunk_long_seq(X_dyn_val, 30, chunk_size)
 
-        ddca_model = fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, use_gpu, batch_size=10, max_epochs=50)
+        ddca_model = fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, use_gpu,
+                              batch_size=args.batchsize, max_epochs=args.epochs)
 
         X_ddca = ddca_model.encode(
-            torch.from_numpy(X_valid_seqs[0]).float().to(device, dtype=ddca_model.dtype)).cpu()
+            torch.from_numpy(_context_concat(X_valid_seqs[0], args.input_context)).float().to(device, dtype=ddca_model.dtype)).cpu()
         print(X_ddca)
         print(torch.mm((X_ddca - X_ddca.mean(0, keepdim=True)).t(), (X_ddca - X_ddca.mean(0, keepdim=True))) / X_ddca.size(0))
         # X_ddca = smoothen(X_ddca)
 
         # Linear DCA
         print("Training DCA")
+        """
         opt = DCA(T=T, d=3, use_scipy=False, block_toeplitz=False, ortho_lambda=10., init="random_ortho",
                   max_epochs=1000, device=device)
         opt.fit(X_noisy_train, X_noisy_val, X_dyn_val, writer)
@@ -156,9 +199,22 @@ if __name__ == "__main__":
         X_dca = np.dot(X_noisy_val, V_dca)  # recontructed 3-d signals: X_dca
         X_dca = X_dca[:chunk_size, :]
         # X_dca = smoothen(X_dca)
+        """
+
+        dca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type="lin",
+                                                 input_context=args.input_context,
+                                                 ortho_lambda=args.ortho_lambda, block_toeplitz=False,
+                                                 dropout=0.0, init="random_ortho")
+        dca_model = fit_ddca(dca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, use_gpu,
+                              batch_size=args.batchsize, max_epochs=args.epochs)
+
+        X_dca = dca_model.encode(
+            torch.from_numpy(_context_concat(X_valid_seqs[0], args.input_context)).float().to(device,
+                                                                            dtype=dca_model.dtype)).cpu()
+
 
         print("Matching DCA")
-        X_dca_recon = match(X_dca, X_dyn_seqs[0], 15000, device)
+        X_dca_recon = match(X_dca.detach().cpu().numpy(), X_dyn_seqs[0], 15000, device)
         # match d-DCA with ground-truth
         print("Matching d-DCA")
         X_ddca_recon = match(X_ddca.detach().cpu().numpy(), X_dyn_seqs[0], 15000, device)
@@ -177,3 +233,7 @@ if __name__ == "__main__":
 
     plot_figs(dca_recons, ddca_recons, X_dyn_seqs[0], X_clean_seqs[0], X_valid_seqs[0], r2_vals, snr_vals, "DCA",
               "d-DCA", "figs/result.pdf")
+
+"""
+python3 nonlinear_lorenz.py --encoder_type dnn --dropout 0.5 --ortho_lambda 100.0
+"""
