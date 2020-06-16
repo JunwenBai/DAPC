@@ -87,14 +87,14 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             self.encoder = LIN(self.idim, self.fdim, dropout=self.dropout)
         else:
             if self.encoder_type == "dnn":
-                self.encoder = DNN(self.idim, self.fdim, h_sizes=[128, 128], dropout=self.dropout)  # Dim reduction NN
+                self.encoder = DNN(self.idim, self.fdim, h_sizes=[256, 256], dropout=self.dropout)  # Dim reduction NN
             else:  # ['lstm', 'gru', 'blstm', 'bgru']
                 self.encoder = RNN(idim=self.idim, elayers=3, cdim=128, hdim=self.fdim, dropout=self.dropout,
                                typ=self.encoder_type)
 
         # Weiran: based on my experience, reconstruction network would better be a DNN than RNNs.
         if self.recon_lambda > 0:
-            self.decoder = DNN(self.fdim, self.idim, n_hid=128, dropout=self.dropout)
+            self.decoder = DNN(self.fdim, self.idim, h_sizes=[256, 256], dropout=self.dropout)
         else:
             self.decoder = None
 
@@ -128,7 +128,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         else:
             recon_loss = 0.0
         self.loss = - pi + self.ortho_lambda * ortho_loss + self.recon_lambda * recon_loss
-        return self.loss, float(pi), float(ortho_loss), recon_loss, (self.cov_frame).detach().cpu().numpy()
+        return self.loss, float(pi), float(ortho_loss), float(recon_loss), (self.cov_frame).detach().cpu().numpy()
 
 
     def encode(self, x):
@@ -192,7 +192,7 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False,
         model.eval()
         total_pi = 0.0
         total_ortho_loss = 0.0
-        total_recon_loss = 0.0
+        total_loss_recon = 0.0
         total_cov_frame = np.zeros([model.fdim, model.fdim])
         for i in range(int(math.ceil(n_valid / batch_size))):
             x_batch = [torch.from_numpy(_context_concat(X_valid[_],input_context)).float() for _ in range(i*batch_size, min((i+1)*batch_size, n_valid))]
@@ -205,13 +205,13 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False,
 
             total_pi += pi
             total_ortho_loss += loss_orth
+            print(loss_recon)
             total_loss_recon += loss_recon * total_len_batch
             total_cov_frame += cov_frame * total_len_batch
 
-
         avg_pi_valid = total_pi / n_batch_valid
         avg_ortho_loss_valid = total_ortho_loss / n_batch_valid
-        avg_recon_loss_valid = total_recon_loss / sum(L_valid)
+        avg_recon_loss_valid = total_loss_recon / sum(L_valid)
         avg_cov_frame = total_cov_frame / sum(L_valid)
         print("epoch %d, valid avg pi=%f, ortho_loss=%f, recon_loss=%f" %
               (epoch, avg_pi_valid, avg_ortho_loss_valid, avg_recon_loss_valid))

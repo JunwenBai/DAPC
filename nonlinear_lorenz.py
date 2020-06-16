@@ -1,24 +1,21 @@
-import sys
+import sys, os
 import pdb
 
 sys.path.append(".")
 sys.path.append("..")
 
 import numpy as np
-import matplotlib.pyplot as plt
 
 from ddca.ddca import DynamicalComponentsAnalysis
 from ddca.ddca import fit_ddca
-from ddca.utils import _context_concat
+from ddca.utils import _context_concat, parsegpuid
 from ddca.data_gen import gen_nonlinear_noisy_lorenz, gen_lorenz_data
 from ddca.data_process import smoothen, match, split, chunk_long_seq
 from ddca.solver import DNN, KERNEL
 from ddca.plotting import plot_figs
-from dca import DynamicalComponentsAnalysis as DCA
+# from dca import DynamicalComponentsAnalysis as DCA
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -33,6 +30,7 @@ parser.add_argument("--batchsize", default=20, help="Number of sequences in each
 parser.add_argument("--encoder_type", default="lin", type=str, choices=["lin", "dnn", "gru", "lstm", "bgru", "blstm"])
 parser.add_argument("--epochs", default=20, help="Number of training epochs", type=int)
 parser.add_argument("--input_context", default=0, help="Number of context frames for splicing", type=int)
+parser.add_argument("--gpuid", default="0", help="ID of gpu device to be used", type=str)
 parser.add_argument("--seed", default=0, help="Random seed", type=int)
 args = parser.parse_args()
 
@@ -41,6 +39,13 @@ if __name__ == "__main__":
     np.random.seed(args.seed)  # fix the seed
     torch.manual_seed(args.seed)  # fix the seed
     torch.cuda.manual_seed(args.seed)
+
+    # Handle multiple gpu issues.
+    gpuid = args.gpuid
+    gpulist = parsegpuid(gpuid)
+    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join([str(x) for x in gpulist])
+    numGPUs = len(gpulist)
+    print("Using %d gpus, CUDA_VISIBLE_DEVICES=%s" % (numGPUs, os.environ["CUDA_VISIBLE_DEVICES"]))
 
     T = args.T
     fdim = args.fdim

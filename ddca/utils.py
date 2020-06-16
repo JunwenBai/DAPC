@@ -388,3 +388,15 @@ def _context_concat(seq, context_size=0):
         output.append(tmp)
 
     return np.concatenate(output, 1)
+
+def parsegpuid(gpuidStr):
+
+    tmp=gpuidStr.split(",")
+    result=[]
+    for t in tmp:
+        if "-" in t:
+            r = t.split("-")
+            result += range( int(r[0]), int(r[1])+1 )
+        else:
+            result.append(int(t))
+    return result
