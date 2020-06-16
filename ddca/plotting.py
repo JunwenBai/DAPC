@@ -13,7 +13,7 @@ dim_colors = ["red", "coral", "gray", "black"]
 
 def lorenz_fig_axes(fig_width=12, left_ax_width=0.1, left_ax_wpad=0.05, wpad_edge=0.05,
                     wpad_mid=0.05, hpad_bottom=0.1, hpad_top=0.025, hpad_mid=0.075):
-    sq_width = (1 - 2 * wpad_edge - 3 * wpad_mid - left_ax_width - left_ax_wpad) / 4
+    sq_width = (1 - 2 * wpad_edge - 4 * wpad_mid - left_ax_width - left_ax_wpad) / 5
     sq_height = (1 - hpad_top - hpad_bottom - hpad_mid) / 2
     fig_height = sq_width * fig_width / sq_height
     fig = plt.figure(figsize=(fig_width, fig_height))
@@ -54,6 +54,10 @@ def lorenz_fig_axes(fig_width=12, left_ax_width=0.1, left_ax_wpad=0.05, wpad_edg
     upper_right_hpad = 0.2 * sq_height
     upper_right_ax_height = (sq_height - upper_right_hpad - upper_right_pad_top -
                              upper_right_pad_bottom) / 2
+    ax6 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + 3 * sq_width + 3 * wpad_mid,
+                        top_row_y + upper_right_pad_bottom - upper_right_ax_height -
+                        upper_right_hpad,
+                        sq_width, upper_right_ax_height))
     ax5 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + 3 * sq_width + 3 * wpad_mid,
                         top_row_y + upper_right_pad_bottom,
                         sq_width, upper_right_ax_height))
@@ -65,11 +69,11 @@ def lorenz_fig_axes(fig_width=12, left_ax_width=0.1, left_ax_wpad=0.05, wpad_edg
     # Bottom row
     # Special Lorenz plots on the left
     # First, do boring square on upper right
-    ax12 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + 3 * sq_width + 3 * wpad_mid,
-                         hpad_bottom, sq_width, sq_height))
+    ax13 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + 4 * sq_width + 4 * wpad_mid,
+                         1 - hpad_top - sq_height - upper_right_hpad, sq_width, sq_height))
 
     # Then, add a box with 6 subplots for Lorenz displays
-    lorenz_box_width = 1. - 2 * wpad_edge - wpad_mid - sq_width - left_ax_width - left_ax_wpad
+    lorenz_box_width = 1. - 2 * wpad_edge - 2 * wpad_mid - 2 * sq_width - left_ax_width - left_ax_wpad
     lorenz_box_height = sq_height
 
     lorenz_pad_left = 0.15 * lorenz_box_width
@@ -84,27 +88,27 @@ def lorenz_fig_axes(fig_width=12, left_ax_width=0.1, left_ax_wpad=0.05, wpad_edg
                        2 * lorenz_wspace) / 3
     lorenz_ax_height = (lorenz_box_height - lorenz_pad_bottom - lorenz_pad_top - lorenz_hspace) / 2
 
-    ax7 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + lorenz_pad_left,
+    ax8 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + lorenz_pad_left,
                         hpad_bottom + lorenz_pad_bottom,
                         lorenz_ax_width, lorenz_ax_height), projection='3d')
-    ax6 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + lorenz_pad_left,
+    ax7 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + lorenz_pad_left,
                         hpad_bottom + lorenz_pad_bottom + lorenz_ax_height + lorenz_hspace,
                         lorenz_ax_width, lorenz_ax_height), projection='3d')
 
+    ax10 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + lorenz_pad_left + lorenz_wspace +
+                        lorenz_ax_width,
+                        hpad_bottom + lorenz_pad_bottom,
+                        lorenz_ax_width, lorenz_ax_height), projection='3d')
     ax9 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + lorenz_pad_left + lorenz_wspace +
                         lorenz_ax_width,
-                        hpad_bottom + lorenz_pad_bottom,
-                        lorenz_ax_width, lorenz_ax_height), projection='3d')
-    ax8 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + lorenz_pad_left + lorenz_wspace +
-                        lorenz_ax_width,
                         hpad_bottom + lorenz_pad_bottom + lorenz_ax_height + lorenz_hspace,
                         lorenz_ax_width, lorenz_ax_height), projection='3d')
 
-    ax11 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + lorenz_pad_left +
+    ax12 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + lorenz_pad_left +
                          2 * lorenz_wspace + 2 * lorenz_ax_width,
                          hpad_bottom + lorenz_pad_bottom,
                          lorenz_ax_width, lorenz_ax_height), projection='3d')
-    ax10 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + lorenz_pad_left +
+    ax11 = fig.add_axes((wpad_edge + left_ax_width + left_ax_wpad + lorenz_pad_left +
                          2 * lorenz_wspace + 2 * lorenz_ax_width,
                          hpad_bottom + lorenz_pad_bottom + lorenz_ax_height + lorenz_hspace,
                          lorenz_ax_width, lorenz_ax_height), projection='3d')
@@ -130,12 +134,12 @@ def lorenz_fig_axes(fig_width=12, left_ax_width=0.1, left_ax_wpad=0.05, wpad_edg
              va="bottom", ha="center", color="black", **style.panel_letter_fontstyle)
     fig.text(wpad_edge + left_ax_width + left_ax_wpad + 0.035, hpad_bottom + sq_height, "F",
              va="bottom", ha="center", color="black", **style.panel_letter_fontstyle)
-    fig.text(wpad_edge + left_ax_width + left_ax_wpad + 3 * sq_width + 3 * wpad_mid,
-             hpad_bottom + sq_height, "G",
+    fig.text(wpad_edge + left_ax_width + left_ax_wpad + 4 * sq_width + 4 * wpad_mid,
+             1 - hpad_top, "G", #hpad_bottom + sq_height, "G",
              va="bottom", ha="center", color="black", **style.panel_letter_fontstyle)
 
     axes = [left_ax_1, left_ax_2, left_ax_3, ax1, ax2, ax3, ax4, ax5, ax6, ax7, ax8, ax9, ax10,
-            ax11, ax12]
+            ax11, ax12, ax13]
     txt_cords = [(dca_txt_x, dca_txt_y), (pca_txt_x, pca_txt_y)]
 
     return axes, txt_cords
@@ -188,7 +192,7 @@ def plot_traces(ax, X, N_to_show, linewidth):
             fontweight="normal")
 
 
-def plot_dca_demo(ax_top, ax_bottom, X_random_trans, X_dca_trans, past_color, future_color, linewidth, label1="DCA", label2="dDCA"):
+def plot_dca_demo(ax_top, ax_middle, ax_bottom, X_random_trans, X_dca_trans, X_gt_trans, past_color, future_color, linewidth, label1="DCA", label2="dDCA"):
     # plot traces
     y_spacing = 3
     max_y = 2 * y_spacing
@@ -196,9 +200,11 @@ def plot_dca_demo(ax_top, ax_bottom, X_random_trans, X_dca_trans, past_color, fu
     t = np.arange(len(X_random_trans))
     for i in range(3):
         ax_top.plot(t, X_random_trans[:len(t), i] + offset_vals[i], c="black", linewidth=linewidth)
-        ax_bottom.plot(t, X_dca_trans[:len(t), i] + offset_vals[i], c="black", linewidth=linewidth)
+        ax_middle.plot(t, X_dca_trans[:len(t), i] + offset_vals[i], c="black", linewidth=linewidth)
+        ax_bottom.plot(t, X_gt_trans[:len(t), i] + offset_vals[i], c="black", linewidth=linewidth)
+
     # configure axes
-    for ax in [ax_top, ax_bottom]:
+    for ax in [ax_top, ax_middle, ax_bottom]:
         ax.set_yticks([])
         ax.spines['right'].set_visible(False)
         ax.spines['top'].set_visible(False)
@@ -217,7 +223,7 @@ def plot_dca_demo(ax_top, ax_bottom, X_random_trans, X_dca_trans, past_color, fu
     t_high_vals = np.linspace(t_mid, t_high, n_t)
     y_low = -y_spacing
     y_high = max_y + y_spacing
-    for ax in [ax_top, ax_bottom]:
+    for ax in [ax_top, ax_middle, ax_bottom]:
         ax.fill_between(t_low_vals, y_low, y_high, alpha=1.0, color=past_color, linewidth=0)
         ax.fill_between(t_high_vals, y_low, y_high, alpha=1.0, color=future_color, linewidth=0)
         ax.text((t_low + t_mid) / 2., y_high * 1.4, "$X_{\mathrm{past}}$", color="black",
@@ -235,7 +241,8 @@ def plot_dca_demo(ax_top, ax_bottom, X_random_trans, X_dca_trans, past_color, fu
                    fontsize=style.axis_label_fontsize)
 
     ax_top.set_ylabel(label1, fontsize=style.axis_label_fontsize * 0.8, labelpad=1)
-    ax_bottom.set_ylabel(label2, fontsize=style.axis_label_fontsize * 0.8, labelpad=1)
+    ax_middle.set_ylabel(label2, fontsize=style.axis_label_fontsize * 0.8, labelpad=1)
+    ax_bottom.set_ylabel("gt", fontsize=style.axis_label_fontsize * 0.8, labelpad=1)
 
 
 def plot_r2(ax, snr_vals, plt_snr_vals, r2_vals, dca_color, pca_color, label1, label2):
@@ -727,11 +734,11 @@ def plot_figs(dca_recons, ddca_recons, X_dyn_val, X_clean_val, X_noisy_val, r2_v
               label1="DCA", label2="d-DCA", fig_name="figs/fig1.pdf"):
     #Create axes
     dca_recons, ddca_recons, snr_vals = np.array(dca_recons), np.array(ddca_recons), np.array(snr_vals)
-    axes, txt_cords = lorenz_fig_axes(fig_width=5.5,
-                                      wpad_edge=0.01, wpad_mid=0.05,
+    axes, txt_cords = lorenz_fig_axes(fig_width=6.6,
+                                      wpad_edge=0.01, wpad_mid=0.06,
                                       left_ax_width=0.125, left_ax_wpad=0.025,
                                       hpad_bottom=0.132, hpad_top=0.06, hpad_mid=0.075)
-    left_ax_1, left_ax_2, left_ax_3, ax1, ax2, ax3, ax4, ax5, ax6, ax7, ax8, ax9, ax10, ax11, ax12 = axes
+    left_ax_1, left_ax_2, left_ax_3, ax1, ax2, ax3, ax4, ax5, ax6, ax7, ax8, ax9, ax10, ax11, ax12, ax13 = axes
     fontsize=8
     linewidth_3d = 0.5
     linewidth_2d = 0.75
@@ -757,14 +764,14 @@ def plot_figs(dca_recons, ddca_recons, X_dyn_val, X_clean_val, X_noisy_val, r2_v
     #divide by a factor to make it look better
     plot_traces(ax3, X_noisy_val[:T_to_show_2d], N_to_show, linewidth_2d)
 
-	#ax4 and ax5: Plots of projections (DCA and dDCA)
+    #ax4 and ax5: Plots of projections (DCA and dDCA)
     #get a random projection of X_noisy and transorm for Lorenz comparison
-    plot_dca_demo(ax4, ax5, dca_recons[X_display_idx, :T_to_show_2d], ddca_recons[X_display_idx, :T_to_show_2d],
+    plot_dca_demo(ax4, ax5, ax6, dca_recons[X_display_idx, :T_to_show_2d], ddca_recons[X_display_idx, :T_to_show_2d], X_dyn_val[:T_to_show_2d],
                   past_color=past_color, future_color=future_color, linewidth=linewidth_2d, label1=label1, label2=label2)
 
     #Plot Lorenz panels (Qualitative results of 3d projection)
-    dca_axes = [ax6, ax8, ax10]
-    ddca_axes = [ax7, ax9, ax11]
+    dca_axes = [ax7, ax9, ax11]
+    ddca_axes = [ax8, ax10, ax12]
     #plt_snr_vals = [0.1, 1.0, 10.0]
     #plt_snr_strs = ["$10^{-1}$", "$10^{0}$", "$10^{1}$"]
     plt_snr_vals = [10.0]
@@ -781,7 +788,7 @@ def plot_figs(dca_recons, ddca_recons, X_dyn_val, X_clean_val, X_noisy_val, r2_v
     plt.gcf().text(txt_cords[1][0], txt_cords[1][1], label2, va="center", ha="center", fontsize=fontsize, color=ddca_color)
 
     #Finally, the R2 vs SNR plot
-    plot_r2(ax12, snr_vals, plt_snr_vals, r2_vals, dca_color, ddca_color, label1, label2)
+    plot_r2(ax13, snr_vals, plt_snr_vals, r2_vals, dca_color, ddca_color, label1, label2)
 
     #Left cov plots
     left_ax_1.set_zorder(1000)
