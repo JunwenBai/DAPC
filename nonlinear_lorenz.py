@@ -50,6 +50,7 @@ if __name__ == "__main__":
     T = args.T
     fdim = args.fdim
     dropout = args.dropout
+    params = 'encoder={}_context={}_T={}_bs={}_dropout={}_ortho-lambda={}_recon-lambda={}'.format(args.encoder_type, args.input_context, args.T, args.batchsize, args.dropout, args.ortho_lambda, args.recon_lambda)
 
     idim = 30  # lift projection dim
     noise_dim = 7  # noisify raw DCA
@@ -75,7 +76,7 @@ if __name__ == "__main__":
         X_clean_train, X_clean_val = split(X_clean, split_rate)
         X_noisy_train, X_noisy_val = split(X_noisy, split_rate)
         X_dyn_train, X_dyn_val = split(X_dynamics, split_rate)
-        writer = SummaryWriter('runs/ddca_T=%d_reg=%.2f' % (T, args.ortho_lambda))
+        writer = SummaryWriter('runs/ddca_{}'.format(params))
 
         # deep DCA
         use_gpu = True
@@ -146,7 +147,7 @@ if __name__ == "__main__":
         ddca_recons.append(X_ddca_recon)
 
     plot_figs(dca_recons, ddca_recons, X_dyn_seqs[0], X_clean_seqs[0], X_valid_seqs[0], r2_vals, snr_vals, "DCA",
-              "d-DCA", "figs/result.pdf")
+              "d-DCA", "figs/result_{}.pdf".format(params))
 
 """
 python3 nonlinear_lorenz.py --encoder_type dnn --dropout 0.5 --ortho_lambda 100.0

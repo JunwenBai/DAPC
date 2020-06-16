@@ -6,7 +6,8 @@ import logging
 import torch
 
 from .solver import LIN, DNN, RNN
-from .utils import calc_cov_from_data, calc_pi_from_cov, make_non_pad_mask, pad_list, _context_concat
+from .cov_utils import calc_cov_from_data, calc_pi_from_cov
+from .utils import make_non_pad_mask, pad_list, _context_concat
 import pdb
 
 
