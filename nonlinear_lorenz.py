@@ -38,11 +38,11 @@ def smoothen(raw_xs, window_len=12, window='hamming'):
 
 
 def match(X, X_true,
-          max_epochs=3000):  # use a linear mapping to match the reconstructed lorenz attractor and the ground truth attractor
-    if not isinstance(X, torch.Tensor): X = torch.Tensor(X)  # torch tensorize
-    if not isinstance(X_true, torch.Tensor): X_true = torch.Tensor(X_true)  # torch tensorize
+          max_epochs=3000, device="cpu"):  # use a linear mapping to match the reconstructed lorenz attractor and the ground truth attractor
+    if not isinstance(X, torch.Tensor): X = torch.Tensor(X).to(device)  # torch tensorize
+    if not isinstance(X_true, torch.Tensor): X_true = torch.Tensor(X_true).to(device)  # torch tensorize
 
-    match_model = Match_DNN(X.shape[1], X_true.shape[1])  # a linear model for matching
+    match_model = Match_DNN(X.shape[1], X_true.shape[1]).to(device)  # a linear model for matching
     match_opt = torch.optim.Adam(match_model.parameters(), lr=1e-3)  # Adam for optimizing
     for epoch in range(max_epochs):  # one can overfit as much as possible since the optimization is for reconstruction
         X_rec = match_model(X)
@@ -144,7 +144,7 @@ if __name__ == "__main__":
         # Linear DCA
         print("Training DCA")
         opt = DCA(T=T, d=3, use_scipy=False, block_toeplitz=False, ortho_lambda=10., init="random_ortho",
-                  max_epochs=2000)
+                  max_epochs=1000, device=device)
         opt.fit(X_noisy_train, X_noisy_val, X_dyn_val, writer)
         V_dca = opt.coef_  # transformation matrix
         X_dca = np.dot(X_noisy_val, V_dca)  # recontructed 3-d signals: X_dca
@@ -157,10 +157,10 @@ if __name__ == "__main__":
         X_noisy_val_plot = X_noisy_val[:num_plot, :]
 
         print("Matching DCA")
-        X_dca_recon = match(X_dca, X_dyn_val_plot, 15000)
+        X_dca_recon = match(X_dca, X_dyn_val_plot, 15000, device)
         # match d-DCA with ground-truth
         print("Matching d-DCA")
-        X_ddca_recon = match(X_ddca.detach().cpu(), X_dyn_val_plot, 15000)
+        X_ddca_recon = match(X_ddca.detach().cpu().numpy(), X_dyn_val_plot, 15000, device)
 
         # R2 of dca
         r2_dca = 1 - np.sum((X_dca_recon - X_dyn_val_plot) ** 2) / np.sum((X_dyn_val_plot - np.mean(X_dyn_val_plot, axis=0)) ** 2)
