@@ -28,6 +28,7 @@ parser.add_argument("--recon_lambda", default=10.0, help="Regularization paramet
 parser.add_argument("--dropout", default=0.0, help="Dropout probability of networks.", type=float)
 parser.add_argument("--batchsize", default=20, help="Number of sequences in each minibatch for unsupervised loss", type=int)
 parser.add_argument("--encoder_type", default="lin", type=str, choices=["lin", "dnn", "gru", "lstm", "bgru", "blstm"])
+parser.add_argument("--base_encoder_type", default="lin", type=str, choices=["lin", "dnn", "gru", "lstm", "bgru", "blstm"])
 parser.add_argument("--epochs", default=20, help="Number of training epochs", type=int)
 parser.add_argument("--input_context", default=0, help="Number of context frames for splicing", type=int)
 parser.add_argument("--gpuid", default="0", help="ID of gpu device to be used", type=str)
@@ -82,7 +83,7 @@ if __name__ == "__main__":
         use_gpu = True
         if use_gpu:
             device = torch.device("cuda:0")
-        print("Training d-DCA")
+        print("Training {}".format(args.encoder_type))
         ddca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type=args.encoder_type,
                                                  input_context=args.input_context,
                                                  ortho_lambda=args.ortho_lambda, recon_lambda=args.recon_lambda,
@@ -105,7 +106,7 @@ if __name__ == "__main__":
         # X_ddca = smoothen(X_ddca)
 
         # Linear DCA
-        print("Training DCA")
+        print("Training {}".format(args.base_encoder_type))
         """
         opt = DCA(T=T, d=3, use_scipy=False, block_toeplitz=False, ortho_lambda=10., init="random_ortho",
                   max_epochs=1000, device=device)
@@ -116,10 +117,16 @@ if __name__ == "__main__":
         # X_dca = smoothen(X_dca)
         """
 
-        dca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type="lin",
-                                                 input_context=args.input_context,
-                                                 ortho_lambda=10.0, block_toeplitz=False,
-                                                 dropout=0.0)
+        if args.base_encoder_type != "lin":
+            dca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type=args.base_encoder_type,
+                                                     input_context=args.input_context,
+                                                     ortho_lambda=args.ortho_lambda, recon_lambda=args.recon_lambda,
+                                                     dropout=args.dropout, block_toeplitz=False)
+        else:
+            dca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type="lin",
+                                                     input_context=args.input_context,
+                                                     ortho_lambda=10.0, block_toeplitz=False,
+                                                     dropout=0.0)
         dca_model = fit_ddca(dca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, use_gpu,
                               batch_size=args.batchsize, max_epochs=50)
 
@@ -128,10 +135,10 @@ if __name__ == "__main__":
                                                                             dtype=dca_model.dtype)).cpu()
 
 
-        print("Matching DCA")
+        print("Matching {}".format(args.base_encoder_type))
         X_dca_recon = match(X_dca.detach().cpu().numpy(), X_dyn_seqs[0], 15000, device)
         # match d-DCA with ground-truth
-        print("Matching d-DCA")
+        print("Matching {}".format(args.encoder_type))
         X_ddca_recon = match(X_ddca.detach().cpu().numpy(), X_dyn_seqs[0], 15000, device)
 
         # R2 of dca
@@ -146,8 +153,8 @@ if __name__ == "__main__":
         dca_recons.append(X_dca_recon)
         ddca_recons.append(X_ddca_recon)
 
-    plot_figs(dca_recons, ddca_recons, X_dyn_seqs[0], X_clean_seqs[0], X_valid_seqs[0], r2_vals, snr_vals, "DCA",
-              "d-DCA", "figs/result_{}.pdf".format(params))
+    plot_figs(dca_recons, ddca_recons, X_dyn_seqs[0], X_clean_seqs[0], X_valid_seqs[0], r2_vals, snr_vals, args.base_encoder_type,
+              args.encoder_type, "figs/result_{}.pdf".format(params))
 
 """
 python3 nonlinear_lorenz.py --encoder_type dnn --dropout 0.5 --ortho_lambda 100.0
