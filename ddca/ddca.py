@@ -138,6 +138,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
     def encode(self, x):
         # Weiran: encode only one utterance.
         # x is a 2D tensor of shape time x idim.
+        self.eval()
         ilens = torch.tensor([x.size(0)], device=x.device).long()
         hs_pad, olens, _ = self.encoder(x.unsqueeze(0), ilens)
         return hs_pad.squeeze(0).detach()
