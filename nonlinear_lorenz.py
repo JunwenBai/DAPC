@@ -18,7 +18,6 @@ import torch
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
-
 def smoothen(raw_xs, window_len=12, window='hamming'):
     xs = raw_xs.T
     ys = []
@@ -37,10 +36,11 @@ def smoothen(raw_xs, window_len=12, window='hamming'):
     return ys
 
 
-def match(X, X_true,
-          max_epochs=3000, device="cpu"):  # use a linear mapping to match the reconstructed lorenz attractor and the ground truth attractor
-    if not isinstance(X, torch.Tensor): X = torch.Tensor(X).to(device)  # torch tensorize
-    if not isinstance(X_true, torch.Tensor): X_true = torch.Tensor(X_true).to(device)  # torch tensorize
+def match(X, X_true, max_epochs=3000, device="cpu"):  # use a linear mapping to match the reconstructed lorenz attractor and the ground truth attractor
+    if not isinstance(X, torch.Tensor):
+        X = torch.Tensor(X).to(device)  # torch tensorize
+    if not isinstance(X_true, torch.Tensor):
+        X_true = torch.Tensor(X_true).to(device)  # torch tensorize
 
     match_model = Match_DNN(X.shape[1], X_true.shape[1]).to(device)  # a linear model for matching
     match_opt = torch.optim.Adam(match_model.parameters(), lr=1e-3)  # Adam for optimizing
@@ -49,6 +49,7 @@ def match(X, X_true,
         match_opt.zero_grad()
         loss = F.mse_loss(X_rec, X_true)  # alternative losses: l1
         loss.backward()
+        loss.detach()
         if epoch % 2000 == 0:
             print(epoch, ":", loss.item())
         match_opt.step()
@@ -89,7 +90,7 @@ if __name__ == "__main__":
     # Set parameters
     T = int(sys.argv[1])  # time window
     ortho_lambda = float(sys.argv[2])
-    if len(sys.argv)>3:
+    if len(sys.argv) > 3:
         seed = int(sys.argv[3])
     else:
         seed = 0
@@ -114,7 +115,8 @@ if __name__ == "__main__":
     r2_vals = np.zeros((len(snr_vals), 2))  # obtain R2 scores for DCA and dDCA
     for snr_idx, snr in enumerate(snr_vals):
         print("Generating noisy data with snr=%.2f ..." % snr)
-        X_clean, X_noisy = gen_nonlinear_noisy_lorenz(idim, T, snr, X_dynamics=X_dynamics, noisy_model=noisy_model, seed=seed)
+        X_clean, X_noisy = gen_nonlinear_noisy_lorenz(idim, T, snr, X_dynamics=X_dynamics, noisy_model=noisy_model,
+                                                      seed=seed)
         X_noisy = X_noisy - X_noisy.mean(axis=0)
 
         X_clean_train, X_clean_val = split(X_clean, split_rate)
@@ -123,22 +125,20 @@ if __name__ == "__main__":
         writer = SummaryWriter('runs/ddca_T=%d_reg=%.2f' % (T, ortho_lambda))
 
         # deep DCA
-        use_gpu=True
+        use_gpu = True
         if use_gpu:
-            device=torch.device("cuda:0")
+            device = torch.device("cuda:0")
         print("Training d-DCA")
-        ddca_model = DynamicalComponentsAnalysis(idim, fdim=3, T=T, encoder_type="lin", block_toeplitz=False, ortho_lambda=ortho_lambda,
-                   dropout=0.5, init="random_ortho")
+        ddca_model = DynamicalComponentsAnalysis(idim, fdim=3, T=T, encoder_type="lin", block_toeplitz=False,
+                                                 ortho_lambda=ortho_lambda,
+                                                 dropout=0.5, init="random_ortho")
         # Weiran: chunk long sequences to shorter ones.
         X_train_seqs, L_train = chunk_long_seq(X_noisy_train, 30, 500)
         X_valid_seqs, L_valid = chunk_long_seq(X_noisy_val, 30, 500)
-        fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs, L_valid, writer,
-                          use_gpu, batch_size=20, max_epochs=50)
+        fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs, L_valid, writer, use_gpu, batch_size=20, max_epochs=50)
 
-        X_ddca = ddca_model.encode(torch.from_numpy(X_noisy_val[:num_plot, :]).float().to(device, dtype=ddca_model.dtype)).cpu()
-        # print("X_ddca:", X_ddca.shape)
-        # ddca_model = opt.model
-        # X_ddca = ddca_model(torch.Tensor(X_noisy_val)).detach().cpu().numpy() # reconstruct 3-d signals: X_ddca
+        X_ddca = ddca_model.encode(
+            torch.from_numpy(X_noisy_val[:num_plot, :]).float().to(device, dtype=ddca_model.dtype)).cpu()
         # X_ddca = smoothen(X_ddca)
 
         # Linear DCA
@@ -163,14 +163,16 @@ if __name__ == "__main__":
         X_ddca_recon = match(X_ddca.detach().cpu().numpy(), X_dyn_val_plot, 15000, device)
 
         # R2 of dca
-        r2_dca = 1 - np.sum((X_dca_recon - X_dyn_val_plot) ** 2) / np.sum((X_dyn_val_plot - np.mean(X_dyn_val_plot, axis=0)) ** 2)
+        r2_dca = 1 - np.sum((X_dca_recon - X_dyn_val_plot) ** 2) / np.sum(
+            (X_dyn_val_plot - np.mean(X_dyn_val_plot, axis=0)) ** 2)
         # R2 of ddca
-        r2_ddca = 1 - np.sum((X_ddca_recon - X_dyn_val_plot) ** 2) / np.sum((X_dyn_val_plot - np.mean(X_dyn_val_plot, axis=0)) ** 2)
+        r2_ddca = 1 - np.sum((X_ddca_recon - X_dyn_val_plot) ** 2) / np.sum(
+            (X_dyn_val_plot - np.mean(X_dyn_val_plot, axis=0)) ** 2)
         # store R2's
         r2_vals[snr_idx] = [r2_dca, r2_ddca]
         # store reconstructed signals    
         dca_recons.append(X_dca_recon)
         ddca_recons.append(X_ddca_recon)
 
-    plot_figs(dca_recons, ddca_recons, X_dyn_val_plot, X_clean_val_plot, X_noisy_val_plot, r2_vals, snr_vals, "DCA", "d-DCA",
-              "figs/result.pdf")
+    plot_figs(dca_recons, ddca_recons, X_dyn_val_plot, X_clean_val_plot, X_noisy_val_plot, r2_vals, snr_vals, "DCA",
+              "d-DCA", "figs/result.pdf")
