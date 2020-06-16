@@ -31,6 +31,28 @@ class KERNEL(nn.Module):
         return torch.cat([self.list[i](aff[:,i,:]) for i in range(self.S)], 1)
 
 
+# Weiran: moved this function here for now.
+def ortho_reg_fn(V, ortho_lambda):
+    """Regularization term which encourages the basis vectors in the
+    columns of V to be orthonormal.
+    Parameters
+    ----------
+    V : shape (hidden, fdim)
+        Projection layer.
+    ortho_lambda : float
+        Regularization hyperparameter.
+    Returns
+    -------
+    reg_val : float
+        Value of regularization function.
+    """
+
+    fdim = V.shape[1]
+    reg_val = ortho_lambda * torch.sum((torch.mm(V.t(), V) - torch.eye(fdim, device=V.device, dtype=V.dtype)) ** 2)
+
+    return reg_val
+
+
 class LIN(nn.Module):
 
     def __init__(self, n_input, n_output, dropout=0.0):
