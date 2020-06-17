@@ -1,4 +1,3 @@
-import time
 import numpy as np
 import math
 import logging
@@ -6,6 +5,7 @@ import logging
 import torch
 
 from .solver import LIN, DNN, RNN
+from transformer.encoder_stoc import Encoder
 from .cov_utils import calc_cov_from_data, calc_pi_from_cov
 from .utils import make_non_pad_mask, pad_list, _context_concat
 import pdb
@@ -87,11 +87,23 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         if self.encoder_type == "lin":
             self.encoder = LIN(self.idim, self.fdim, dropout=self.dropout)
         else:
-            if self.encoder_type == "dnn":
-                self.encoder = DNN(self.idim, self.fdim, h_sizes=[512, 512], dropout=self.dropout)  # Dim reduction NN
-            else:  # ['lstm', 'gru', 'blstm', 'bgru']
-                self.encoder = RNN(idim=self.idim, elayers=3, cdim=256, hdim=self.fdim, dropout=self.dropout,
-                               typ=self.encoder_type)
+            if self.encoder_type == "transformer":
+                self.encoder = Encoder(
+                    idim=idim,
+                    attention_dim=256,  # args.adim,
+                    attention_heads=4,  # args.aheads,
+                    linear_units=2048,  # args.eunits,
+                    num_blocks=12,  # args.elayers,
+                    input_layer="linear",  # args.transformer_input_layer,
+                    dropout_rate=0.1,  # args.dropout_rate,
+                    death_rate=0.0  # args.edeath_rate
+                )
+            else:
+                if self.encoder_type == "dnn":
+                    self.encoder = DNN(self.idim, self.fdim, h_sizes=[512, 512], dropout=self.dropout)  # Dim reduction NN
+                else:  # ['lstm', 'gru', 'blstm', 'bgru']
+                    self.encoder = RNN(idim=self.idim, elayers=3, cdim=256, hdim=self.fdim, dropout=self.dropout,
+                                   typ=self.encoder_type)
 
         # Weiran: based on my experience, reconstruction network would better be a DNN than RNNs.
         if self.recon_lambda > 0:
@@ -113,9 +125,14 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         """
 
         # Weiran: for now, both DNN and RNNs do not reduce the lengths.
-        hs_pad, olens, _ = self.encoder(xs_pad, ilens)
-        olens_list = olens.tolist()
-        hmask = make_non_pad_mask(olens_list).to(xs_pad.device)
+        if not self.encoder_type == "transformer":
+            hs_pad, olens, _ = self.encoder(xs_pad, ilens)
+            olens_list = olens.tolist()
+            hmask = make_non_pad_mask(olens_list).to(xs_pad.device)
+        else:
+            src_mask = make_non_pad_mask(ilens.tolist()).to(xs_pad.device).unsqueeze(-2)
+            hs_pad, hmask = self.encoder(xs_pad, src_mask)
+            olens = torch.sum(hmask[:,0,:].long(), 1)
 
         # Compute cov matrix.
         self.cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.diag_reg)
@@ -136,8 +153,11 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         # Weiran: encode only one utterance.
         # x is a 2D tensor of shape time x idim.
         self.eval()
-        ilens = torch.tensor([x.size(0)], device=x.device).long()
-        hs_pad, olens, _ = self.encoder(x.unsqueeze(0), ilens)
+        if not self.encoder_type == "transformer":
+            ilens = torch.tensor([x.size(0)], device=x.device).long()
+            hs_pad, olens, _ = self.encoder(x.unsqueeze(0), ilens)
+        else:
+            enc_output, _ = self.encoder(x, None)
         return hs_pad.squeeze(0).detach()
 
 
