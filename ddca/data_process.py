@@ -32,7 +32,7 @@ def match(X, X_true, max_epochs=3000, device="cpu"):  # use a linear mapping to 
     match_model = LIN(X.shape[1], X_true.shape[1]).to(device)  # a linear model for matching
     match_opt = torch.optim.Adam(match_model.parameters(), lr=1e-3)  # Adam for optimizing
     for epoch in range(max_epochs):  # one can overfit as much as possible since the optimization is for reconstruction
-        X_rec = match_model(X, None)[0]
+        X_rec = match_model(X, None)
         match_opt.zero_grad()
         loss = F.mse_loss(X_rec, X_true)  # alternative losses: l1
         loss.backward()
@@ -41,7 +41,7 @@ def match(X, X_true, max_epochs=3000, device="cpu"):  # use a linear mapping to 
             print(epoch, ":", loss.item())
         match_opt.step()
 
-    return match_model(X, None)[0].detach().cpu().numpy()
+    return match_model(X, None).detach().cpu().numpy()
 
 
 def plot_3d_sig(X_dca, plt_idx=300, fig_name="X_dca.png"):  # plot 3-d signals in one figure

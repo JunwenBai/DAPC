@@ -61,10 +61,13 @@ class LIN(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.fc1 = nn.Linear(n_input, n_output)
 
-    def forward(self, x, ilens):
+    def forward(self, x, ilens=None):
         x = self.dropout(x)
         x = self.fc1(x)
-        return x, ilens, None
+        if ilens is None:
+            return x
+        else:
+            return x, ilens, None
 
 
 class DNN(nn.Module):
@@ -83,17 +86,20 @@ class DNN(nn.Module):
         
     def reset_parameters(self):
         for layer in self.hidden:
-            stdv = 1. / math.sqrt(layer.weight.size(1))
-            # stdv = 0.5
+            # stdv = 3 / math.sqrt(layer.weight.size(1))
+            stdv = 0.2
             layer.weight.data.normal_(stdv)
             if layer.bias is not None:
                 layer.bias.data.normal_(stdv)    
 
-    def forward(self, x, ilens):
+    def forward(self, x, ilens=None):
         for fc in self.hidden:
             x = self.dropout(F.elu(fc(x)))
         x = self.fc_out(x)
-        return x, ilens, None
+        if ilens is None:
+            return x
+        else:
+            return x, ilens, None
 
 
 class RNN(torch.nn.Module):

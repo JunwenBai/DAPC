@@ -12,7 +12,7 @@ from ddca.ddca import fit_ddca
 from ddca.utils import _context_concat, parsegpuid
 from ddca.data_gen import gen_nonlinear_noisy_lorenz, gen_lorenz_data
 from ddca.data_process import smoothen, match, split, chunk_long_seq
-from ddca.solver import DNN, KERNEL
+from ddca.solver import LIN, DNN, KERNEL
 from ddca.plotting import plot_figs
 # from dca import DynamicalComponentsAnalysis as DCA
 
@@ -58,14 +58,15 @@ if __name__ == "__main__":
     idim = 30  # lift projection dim
     noise_dim = 7  # noisify raw DCA
     split_rate = 0.82
-    snr_vals = [10.]  # signal-to-noise ratios
+    snr_vals = [1.]  # signal-to-noise ratios
     num_samples = 10000  # samples to collect from the lorenz system
 
     print("Generating ground truth dynamics ...")
     X_dynamics = gen_lorenz_data(num_samples)  # 10000 * 3
     # noisy_model = DNN(X_dynamics.shape[1], idim)  # DNN lift projection: 3 -> 30 for d-DCA
+    # noisy_model = KERNEL(X_dynamics[::25], np.linspace(0.3, 1.0, 30))
+    noisy_model = LIN(X_dynamics.shape[1], idim)
     # pdb.set_trace()
-    noisy_model = KERNEL(X_dynamics[::50], np.arange(0.05, 0.34, 0.01))
 
     dca_recons = []
     ddca_recons = []

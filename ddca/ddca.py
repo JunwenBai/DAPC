@@ -89,15 +89,16 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         else:
             if self.encoder_type == "transformer":
                 self.encoder = Encoder(
-                    idim=idim,
+                    idim=idim * (1+2*input_context),
                     attention_dim=256,  # args.adim,
                     attention_heads=4,  # args.aheads,
                     linear_units=2048,  # args.eunits,
                     num_blocks=12,  # args.elayers,
                     input_layer="linear",  # args.transformer_input_layer,
-                    dropout_rate=0.1,  # args.dropout_rate,
+                    dropout_rate=self.dropout,  # args.dropout_rate,
                     death_rate=0.0  # args.edeath_rate
                 )
+                self.proj = LIN(256, self.fdim, dropout=self.dropout)
             else:
                 if self.encoder_type == "dnn":
                     self.encoder = DNN(self.idim, self.fdim, h_sizes=[512, 512], dropout=self.dropout)  # Dim reduction NN
@@ -132,7 +133,9 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         else:
             src_mask = make_non_pad_mask(ilens.tolist()).to(xs_pad.device).unsqueeze(-2)
             hs_pad, hmask = self.encoder(xs_pad, src_mask)
-            olens = torch.sum(hmask[:,0,:].long(), 1)
+            hs_pad = self.proj(hs_pad, None)
+            hmask = hmask[:, 0, :]
+            olens = torch.sum(hmask.long(), 1)
 
         # Compute cov matrix.
         self.cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.diag_reg)
@@ -153,11 +156,12 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         # Weiran: encode only one utterance.
         # x is a 2D tensor of shape time x idim.
         self.eval()
+        ilens = torch.tensor([x.size(0)], device=x.device).long()
         if not self.encoder_type == "transformer":
-            ilens = torch.tensor([x.size(0)], device=x.device).long()
-            hs_pad, olens, _ = self.encoder(x.unsqueeze(0), ilens)
+            hs_pad, _, _ = self.encoder(x.unsqueeze(0), ilens)
         else:
-            enc_output, _ = self.encoder(x, None)
+            enc_output, _ = self.encoder(x.unsqueeze(0), None)
+            hs_pad = self.proj(enc_output, None)
         return hs_pad.squeeze(0).detach()
 
 
