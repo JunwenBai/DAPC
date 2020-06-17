@@ -10,7 +10,7 @@ import pdb
 import matplotlib.pyplot as plt
 import numpy
 
-from espnet.asr import asr_utils
+import transformer.asr_utils
 
 
 def _plot_and_save_attention(att_w, filename, xtokens=None, ytokens=None):

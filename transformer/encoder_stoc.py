@@ -8,19 +8,19 @@
 
 import torch
 
-from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention
-from espnet.nets.pytorch_backend.transformer.embedding import PositionalEncoding
-from espnet.nets.pytorch_backend.transformer.encoder_layer import StochasticEncoderLayer
-from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
-from espnet.nets.pytorch_backend.transformer.multi_layer_conv import Conv1dLinear
-from espnet.nets.pytorch_backend.transformer.multi_layer_conv import MultiLayeredConv1d
-from espnet.nets.pytorch_backend.transformer.positionwise_feed_forward import PositionwiseFeedForward
-# from espnet.nets.pytorch_backend.transformer.repeat import repeat
-from espnet.nets.pytorch_backend.transformer.repeat import repeat_i
-from espnet.nets.pytorch_backend.transformer.subsampling import Conv2dSubsampling
-from espnet.nets.pytorch_backend.transformer.subsampling import Conv2dSubsampling_with_deltas
-from espnet.nets.pytorch_backend.transformer.subsampling import Conv2dSubsampling_1layer_with_deltas
-from espnet.nets.pytorch_backend.transformer.subsampling import Conv2dSubsampling_yingbo
+from transformer.attention import MultiHeadedAttention
+from transformer.embedding import PositionalEncoding
+from transformer.encoder_layer import StochasticEncoderLayer
+from transformer.layer_norm import LayerNorm
+from transformer.multi_layer_conv import Conv1dLinear
+from transformer.multi_layer_conv import MultiLayeredConv1d
+from transformer.positionwise_feed_forward import PositionwiseFeedForward
+# from transformer.repeat import repeat
+from transformer.repeat import repeat_i
+from transformer.subsampling import Conv2dSubsampling
+from transformer.subsampling import Conv2dSubsampling_with_deltas
+from transformer.subsampling import Conv2dSubsampling_1layer_with_deltas
+from transformer.subsampling import Conv2dSubsampling_yingbo
 
 
 class Encoder(torch.nn.Module):

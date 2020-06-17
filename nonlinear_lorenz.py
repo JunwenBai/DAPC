@@ -28,7 +28,7 @@ parser.add_argument("--ortho_lambda", default=10.0, help="Regularization paramet
 parser.add_argument("--recon_lambda", default=10.0, help="Regularization parameter for reconstruction", type=float)
 parser.add_argument("--dropout", default=0.0, help="Dropout probability of networks.", type=float)
 parser.add_argument("--batchsize", default=20, help="Number of sequences in each minibatch for unsupervised loss", type=int)
-parser.add_argument("--encoder_type", default="lin", type=str, choices=["lin", "dnn", "gru", "lstm", "bgru", "blstm"])
+parser.add_argument("--encoder_type", default="lin", type=str, choices=["lin", "transformer", "dnn", "gru", "lstm", "bgru", "blstm"])
 parser.add_argument("--base_encoder_type", default="lin", type=str, choices=["lin", "dnn", "gru", "lstm", "bgru", "blstm"])
 parser.add_argument("--epochs", default=20, help="Number of training epochs", type=int)
 parser.add_argument("--input_context", default=0, help="Number of context frames for splicing", type=int)

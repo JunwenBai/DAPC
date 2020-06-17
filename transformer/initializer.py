@@ -8,7 +8,7 @@
 
 import torch
 
-from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
+from transformer.layer_norm import LayerNorm
 
 
 def initialize(model, init_type="pytorch"):

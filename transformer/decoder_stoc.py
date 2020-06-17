@@ -9,20 +9,19 @@
 import pdb
 import torch
 
-from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention
-from espnet.nets.pytorch_backend.transformer.decoder_layer import StochasticDecoderLayer
-from espnet.nets.pytorch_backend.transformer.embedding import PositionalEncoding
-from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
-from espnet.nets.pytorch_backend.transformer.mask import subsequent_mask
-from espnet.nets.pytorch_backend.transformer.positionwise_feed_forward import PositionwiseFeedForward
-# from espnet.nets.pytorch_backend.transformer.repeat import repeat
-from espnet.nets.pytorch_backend.transformer.repeat import repeat_i
-from espnet.nets.scorer_interface import ScorerInterface
+from transformer.attention import MultiHeadedAttention
+from transformer.decoder_layer import StochasticDecoderLayer
+from transformer.embedding import PositionalEncoding
+from transformer.layer_norm import LayerNorm
+from transformer.mask import subsequent_mask
+from transformer.positionwise_feed_forward import PositionwiseFeedForward
+# from transformer.repeat import repeat
+from transformer.repeat import repeat_i
 
-from espnet.nets.pytorch_backend.nets_utils import make_non_pad_mask
-from espnet.nets.pytorch_backend.e2e_asr import pad_list
+from ddca.utils import make_non_pad_mask
+from ddca.utils import pad_list
 
-class Decoder(ScorerInterface, torch.nn.Module):
+class Decoder(torch.nn.Module):
     """Transfomer decoder module.
 
     :param int odim: output dim

@@ -8,7 +8,7 @@
 
 import torch
 
-from espnet.nets.pytorch_backend.transformer.embedding import PositionalEncoding
+from transformer.embedding import PositionalEncoding
 
 import numpy as np
 def _context_concat(seq, context_size=0):
