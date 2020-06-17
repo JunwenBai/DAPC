@@ -5,6 +5,7 @@ sys.path.append(".")
 sys.path.append("..")
 
 import numpy as np
+from sklearn.manifold import TSNE
 
 from ddca.ddca import DynamicalComponentsAnalysis
 from ddca.ddca import fit_ddca
@@ -51,11 +52,12 @@ if __name__ == "__main__":
     T = args.T
     fdim = args.fdim
     dropout = args.dropout
-    params = 'encoder={}_context={}_T={}_bs={}_dropout={}_ortho-lambda={}_recon-lambda={}'.format(args.encoder_type, args.input_context, args.T, args.batchsize, args.dropout, args.ortho_lambda, args.recon_lambda)
+    params = 'encoder={}_fdim={}_context={}_T={}_bs={}_dropout={}_ortho-lambda={}_recon-lambda={}'.format(
+			args.encoder_type, args.fdim, args.input_context, args.T, args.batchsize, args.dropout, args.ortho_lambda, args.recon_lambda)
 
     idim = 30  # lift projection dim
     noise_dim = 7  # noisify raw DCA
-    split_rate = 0.8
+    split_rate = 0.82
     snr_vals = [10.]  # signal-to-noise ratios
     num_samples = 10000  # samples to collect from the lorenz system
 
@@ -100,9 +102,11 @@ if __name__ == "__main__":
                               batch_size=args.batchsize, max_epochs=args.epochs)
 
         X_ddca = ddca_model.encode(
-            torch.from_numpy(_context_concat(X_valid_seqs[0], args.input_context)).float().to(device, dtype=ddca_model.dtype)).cpu()
+            torch.from_numpy(_context_concat(X_valid_seqs[0], args.input_context)).float().to(device, dtype=ddca_model.dtype)).detach().cpu().numpy()
+        if X_ddca.shape[1] > 3:
+            X_ddca = TSNE(n_components=3).fit_transform(X_ddca)
         print(X_ddca)
-        print(torch.mm((X_ddca - X_ddca.mean(0, keepdim=True)).t(), (X_ddca - X_ddca.mean(0, keepdim=True))) / X_ddca.size(0))
+        print(np.matmul((X_ddca - X_ddca.mean(0)).T, (X_ddca - X_ddca.mean(0))) / X_ddca.shape[0])
         # X_ddca = smoothen(X_ddca)
 
         # Linear DCA
@@ -132,14 +136,15 @@ if __name__ == "__main__":
 
         X_dca = dca_model.encode(
             torch.from_numpy(_context_concat(X_valid_seqs[0], args.input_context)).float().to(device,
-                                                                            dtype=dca_model.dtype)).cpu()
-
+                                                                            dtype=dca_model.dtype)).detach().cpu().numpy()
+        if X_dca.shape[1] > 3:
+            X_dca = TSNE(n_components=3).fit_transform(X_dca)
 
         print("Matching {}".format(args.base_encoder_type))
-        X_dca_recon = match(X_dca.detach().cpu().numpy(), X_dyn_seqs[0], 15000, device)
+        X_dca_recon = match(X_dca, X_dyn_seqs[0], 15000, device)
         # match d-DCA with ground-truth
         print("Matching {}".format(args.encoder_type))
-        X_ddca_recon = match(X_ddca.detach().cpu().numpy(), X_dyn_seqs[0], 15000, device)
+        X_ddca_recon = match(X_ddca, X_dyn_seqs[0], 15000, device)
 
         # R2 of dca
         r2_dca = 1 - np.sum((X_dca_recon - X_dyn_seqs[0]) ** 2) / np.sum(
