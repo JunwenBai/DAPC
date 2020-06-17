@@ -88,14 +88,14 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             self.encoder = LIN(self.idim, self.fdim, dropout=self.dropout)
         else:
             if self.encoder_type == "dnn":
-                self.encoder = DNN(self.idim, self.fdim, h_sizes=[256, 256], dropout=self.dropout)  # Dim reduction NN
+                self.encoder = DNN(self.idim, self.fdim, h_sizes=[512, 512], dropout=self.dropout)  # Dim reduction NN
             else:  # ['lstm', 'gru', 'blstm', 'bgru']
-                self.encoder = RNN(idim=self.idim, elayers=3, cdim=128, hdim=self.fdim, dropout=self.dropout,
+                self.encoder = RNN(idim=self.idim, elayers=3, cdim=256, hdim=self.fdim, dropout=self.dropout,
                                typ=self.encoder_type)
 
         # Weiran: based on my experience, reconstruction network would better be a DNN than RNNs.
         if self.recon_lambda > 0:
-            self.decoder = DNN(self.fdim, self.idim, h_sizes=[256, 256], dropout=self.dropout)
+            self.decoder = DNN(self.fdim, self.idim, h_sizes=[512, 512], dropout=self.dropout)
         else:
             self.decoder = None
 
