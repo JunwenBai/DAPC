@@ -108,7 +108,7 @@ def calc_cov_from_data(xs_pad, src_mask, T, toeplitzify=True, reg=0.0):
     mask_with_lags = src_mask.unfold(1, T, 1).all(dim=2)
     mask_float = mask_with_lags.float().flatten().unsqueeze(1)
     xs_with_lags = torch.reshape(xs_with_lags, [-1, T*d])
-    xs_with_lags_mean = torch.sum(torch.mul(xs_with_lags, mask_float), 1, keepdim=True) / torch.sum(mask_float)
+    xs_with_lags_mean = torch.sum(torch.mul(xs_with_lags, mask_float), 0, keepdim=True) / torch.sum(mask_float)
     # Remove mean for concat frames.
     xs_with_lags = xs_with_lags - xs_with_lags_mean
 
