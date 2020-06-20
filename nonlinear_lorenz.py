@@ -65,7 +65,6 @@ if __name__ == "__main__":
 
     print("Generating ground truth dynamics ...")
     X_dynamics = gen_lorenz_data(num_samples)  # 10000 * 3
-    X_dynamics = np.load("X_dynamics.npy")
     noisy_model = DNN(X_dynamics.shape[1], idim)  # DNN lift projection: 3 -> 30 for d-DCA
     # noisy_model = KERNEL(X_dynamics[::25], np.linspace(0.3, 1.0, 30))
     # noisy_model = LIN(X_dynamics.shape[1], idim)
@@ -81,7 +80,6 @@ if __name__ == "__main__":
         print("Generating noisy data with snr=%.2f ..." % snr)
         X_clean, X_noisy = gen_nonlinear_noisy_lorenz(idim, T, snr, X_dynamics=X_dynamics, noisy_model=noisy_model,
                                                       seed=args.seed)
-        X_noisy = np.load("X_noisy_19940423.npy")
         X_noisy = X_noisy - X_noisy.mean(axis=0)
 
         X_clean_train, X_clean_val = split(X_clean, split_rate)
