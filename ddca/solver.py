@@ -33,7 +33,7 @@ class KERNEL(nn.Module):
 
 
 # Weiran: moved this function here for now.
-def ortho_reg_fn(V, ortho_lambda):
+def ortho_reg_fn(V, ortho_lambda=1.):
     """Regularization term which encourages the basis vectors in the
     columns of V to be orthonormal.
     Parameters

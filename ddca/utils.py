@@ -2,6 +2,59 @@ import numpy as np
 import torch
 import pdb
 
+
+def gen_pos_indices(length, shifts):
+    # shifts is of the form [-3, -2, -1, 0, 1, 2, 3]
+    output=[]
+    for i in range(length):
+        tmp=torch.LongTensor([i+s for s in shifts])
+        # Each position has a fixed number of positive examples.
+        tmp[tmp<0]=0; tmp[tmp>=length]=length-1
+        output.append(tmp)
+    return torch.cat(output)
+
+
+def gen_neg_indices(length, shifts, numneg, margin=2):
+    output=[]
+    # Each position draws numneg examples for each positive example.
+    totalnegs = len(shifts) * numneg
+    left=min(shifts)
+    right=max(shifts)
+    for i in range(length):
+        output.append(torch.from_numpy(np.random.choice(list(range(0,i+left-margin)) + list(range(i+right+margin, length)), totalnegs)).long())
+    return torch.cat(output)
+
+
+def gen_batch_indices(lengths, max_len, shifts, numneg, portion=0.5):
+    numpos=len(shifts)
+    slf=[]
+    pos=[]
+    neg=[]
+
+    numneg_within = int(numneg*portion)
+    numneg_between = numneg - numneg_within
+
+    numutts=len(lengths)
+    count=0
+    for l in lengths:
+        if l>10:
+            slf.append(torch.arange(l).view(-1, 1).repeat(1, numpos).view(-1) + count*max_len)
+
+            p = gen_pos_indices(l, shifts)
+            pos.append(p + count*max_len)
+
+            n = gen_neg_indices(l, shifts, numneg_within) + count*max_len
+            if numneg_between>0:
+                n = np.reshape(n, [l, numneg_within * numpos])
+                # Use negative examples from other utterances.
+                n_between = np.random.choice(list(range(0, count*max_len)) + list(range( (count+1)*max_len, numutts*max_len )), l*numpos*numneg_between)
+                n = np.concatenate([n, np.reshape(n_between, [l, numpos*numneg_between])], axis=1).flatten()
+            neg.append(n)
+
+        count+=1
+    return np.concatenate(slf), np.concatenate(pos), np.concatenate(neg)
+
+
 """
 Weiran: code below are borrowed from espnet.
 """
