@@ -71,7 +71,7 @@ def main(args):
 
     print("Generating ground truth dynamics ...")
     X_dynamics = gen_lorenz_data(num_samples)  # 10000 * 3
-    noisy_model = DNN(X_dynamics.shape[1], idim)  # DNN lift projection: 3 -> 30 for d-DCA
+    noisy_model = DNN(X_dynamics.shape[1], idim, dropout=0.5)  # DNN lift projection: 3 -> 30 for d-DCA
     # noisy_model = KERNEL(X_dynamics[::25], np.linspace(0.3, 1.0, 30))
     # noisy_model = LIN(X_dynamics.shape[1], idim)
     # pdb.set_trace()
