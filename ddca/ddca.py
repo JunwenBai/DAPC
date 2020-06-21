@@ -3,7 +3,6 @@ import math
 import logging
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
 from .solver import LIN, DNN, RNN, ortho_reg_fn
@@ -11,6 +10,7 @@ from transformer.encoder_stoc import Encoder
 from .cov_utils import calc_cov_from_data, calc_pi_from_cov
 from .utils import make_non_pad_mask, pad_list, _context_concat, gen_batch_indices
 from .spec_augment import spectral_masking
+from distutils.util import strtobool
 import pdb
 
 
@@ -26,15 +26,6 @@ def ortho_reg_Y(Y, src_mask):
 
     cov = torch.mm(torch.mul(Y, mask_float).t(), Y) / torch.sum(mask_float)
     return torch.sum((cov - I) ** 2), cov
-
-
-def compute_recon_mse(recon, X, src_mask):
-    # Weiran: recon and X are of shape (B, maxlen, fdim).
-    idim = X.size(2)
-
-    loss = torch.sum( (recon.view([-1,idim]) - X.view([-1,idim])) ** 2, 1)
-    mask_float = src_mask.float().view([-1])
-    return torch.sum(torch.mul(loss, mask_float)) / torch.sum(mask_float)
 
 
 class DynamicalComponentsAnalysis(torch.nn.Module):
@@ -55,65 +46,137 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         `2 * T`. When fitting a model, the length of the shortest time series must be greater than
         `2 * T` and for good performance should be much greater than `2 * T`.
     ortho_lambda : float
-        Coefficient on term that keeps V close to orthonormal.
-    block_toeplitz : bool
-        If True, uses the block-Toeplitz logdet algorithm which is typically faster and less
-        memory intensive on cpu for `T >~ 10` and `fdim >~ 40`.
+        Coefficient on term that keeps projected covariance close to identity.
+    recon_lambda : float
+        Coefficient on reconstruction loss term.
     dtype : pytorch.dtype
         What dtype to use for computation.
     """
 
-    def __init__(self, idim, fdim, T, input_context=0, recon_lambda=0.0, ortho_lambda=0.0,
-                 encoder_type="dnn", block_toeplitz=False, diag_reg=1e-6, dropout=0.5,
-                 masked_recon=False,
-                 use_cpc=False, num_pos=4, num_neg=16,
-                 dtype=torch.float32, rng_or_seed=None):
+    @staticmethod
+    def add_arguments(parser):
+        """Add arguments."""
+        group = parser.add_argument_group("DynamicalComponentsAnalysis model setting")
+
+        # Weiran: transformer-related.
+        group.add_argument("--transformer-init", type=str, default="pytorch",
+                           choices=["pytorch", "xavier_uniform", "xavier_normal",
+                                    "kaiming_uniform", "kaiming_normal"],
+                           help='how to initialize transformer parameters')
+        group.add_argument("--transformer-input-layer", type=str, default="linear",
+                           choices=["linear", "embed"],
+                           help='transformer input layer type')
+        # Weiran: death rates for stochastic layers.
+        group.add_argument('--edeath-rate', default=0.0, type=float,
+                           help='death rate for encoder')
+        group.add_argument('--ddeath-rate', default=0.0, type=float,
+                           help='death rate for decoder')
+        # Encoder
+        group.add_argument('--dropout-rate', default=0.0, type=float,
+                           help='Dropout rate for the encoder')
+        group.add_argument('--elayers', default=4, type=int,
+                           help='Number of encoder layers (for shared recognition part in multi-speaker asr mode)')
+        group.add_argument('--eunits', '-u', default=300, type=int,
+                           help='Number of encoder hidden units')
+        # Attention
+        group.add_argument('--adim', default=320, type=int,
+                           help='Number of attention transformation dimensions')
+        group.add_argument('--aheads', default=4, type=int,
+                           help='Number of heads for multi head attention')
+
+        # CPC-related.
+        group.add_argument('--num_pos', default=4, type=int,
+                           help='Number of positive samples for CPC')
+        group.add_argument('--num_neg', default=16, type=int,
+                           help='Number of negative samples for CPC')
+
+        # Specaugment-related.
+        group.add_argument('--spec_mask_F', default=5, type=int,
+                           help='Maximum width of frequency masks')
+        group.add_argument('--spec_mask_T', default=40, type=int,
+                           help='Maximum width of time masks')
+        group.add_argument('--num_freq_masks', default=2, type=int,
+                           help='Number of frequency masks')
+        group.add_argument('--num_time_masks', default=2, type=int,
+                           help='Number of time masks')
+
+        # Covariance regularization.
+        group.add_argument('--block_toeplitz', default=False, type=strtobool,
+                           help='Whether to Toeplitzify the covariance matrix')
+        group.add_argument('--cov_diag_reg', default=0.0, type=float,
+                           help='Constants added to the diagonal of covariance matrix')
+
+        # Input.
+        group.add_argument('--input_context', default=0, type=int,
+                           help='Number of left and right frames used for splicing')
+
+        # Encoder architecture.
+        group.add_argument('--encoder_rnn_num_layers', default=3, type=int,
+                           help='Number hidden layers for encoder RNN')
+        group.add_argument('--encoder_rnn_hidden_size', default=256, type=int,
+                           help='Number of hidden units for encoder RNN')
+
+        group.add_argument('--encoder_dnn_num_layers', default=3, type=int,
+                           help='Number hidden layers for encoder DNN')
+        group.add_argument('--encoder_dnn_hidden_size', default=512, type=int,
+                           help='Number of hidden units for encoder DNN')
+
+        return parser
+
+    def __init__(self, idim, fdim, T, encoder_type, ortho_lambda, recon_lambda, dropout,
+                 use_cpc, masked_recon, args, dtype=torch.float32):
         super(DynamicalComponentsAnalysis, self).__init__()
-        self.input_context = input_context
-        self.idim = idim * (1+2*input_context)
+
+        # Splicing options.
+        self.input_context = args.input_context
+        self.idim = idim * (1+2*self.input_context)
         self.fdim = fdim
+
+        # Model params.
         self.T = T
         self.recon_lambda = recon_lambda
-        self.masked_recon = masked_recon
         self.ortho_lambda = ortho_lambda
         self.dropout = dropout
-        self.use_cpc = use_cpc
-        self.num_pos = num_pos
-        self.num_neg = num_neg
         self.encoder_type = encoder_type
         self.dtype = dtype
-        self.block_toeplitz = block_toeplitz
-        self.diag_reg = diag_reg
-        self.cross_covs = None
+        self.block_toeplitz = args.block_toeplitz
+        self.cov_diag_reg = args.cov_diag_reg
 
-        if rng_or_seed is None:
-            self.rng = np.random
-        elif isinstance(rng_or_seed, np.random.RandomState):
-            self.rng = rng_or_seed
-        else:
-            self.rng = np.random.RandomState(rng_or_seed)
+        # Masked reconstruction params.
+        self.masked_recon = masked_recon
+        self.spec_mask_F = args.spec_mask_F
+        self.spec_mask_T = args.spec_mask_T
+        self.num_freq_masks = args.num_freq_masks
+        self.num_time_masks = args.num_time_masks
+
+        # CPC params.
+        self.use_cpc = use_cpc
+        self.num_pos = args.num_pos
+        self.num_neg = args.num_neg
 
         if self.encoder_type == "lin":
             self.encoder = LIN(self.idim, self.fdim, dropout=self.dropout)
         else:
             if self.encoder_type == "transformer":
                 self.encoder = Encoder(
-                    idim=idim * (1+2*input_context),
-                    attention_dim=256,  # args.adim,
-                    attention_heads=4,  # args.aheads,
-                    linear_units=2048,  # args.eunits,
-                    num_blocks=12,  # args.elayers,
-                    input_layer="linear",  # args.transformer_input_layer,
+                    idim=idim * (1+2*self.input_context),
+                    attention_dim=args.adim,
+                    attention_heads=args.aheads,
+                    linear_units=args.eunits,
+                    num_blocks=args.elayers,
+                    input_layer=args.transformer_input_layer,
                     dropout_rate=self.dropout,  # args.dropout_rate,
-                    death_rate=0.0  # args.edeath_rate
+                    death_rate=args.edeath_rate
                 )
-                self.proj = LIN(256, self.fdim, dropout=self.dropout)
+                self.proj = LIN(args.adim, self.fdim, dropout=self.dropout)
             else:
                 if self.encoder_type == "dnn":
-                    self.encoder = DNN(self.idim, self.fdim, h_sizes=[512, 512], dropout=self.dropout)  # Dim reduction NN
-                else:  # ['lstm', 'gru', 'blstm', 'bgru']
-                    self.encoder = RNN(idim=self.idim, elayers=3, cdim=256, hdim=self.fdim, dropout=self.dropout,
-                                   typ=self.encoder_type)
+                    self.encoder = DNN(self.idim, self.fdim,
+                            h_sizes=[args.encoder_dnn_hidden_size] * args.encoder_dnn_num_layers, dropout=self.dropout)
+                else:
+                    # Choices are ['lstm', 'gru', 'blstm', 'bgru'].
+                    self.encoder = RNN(idim=self.idim, elayers=args.encoder_rnn_num_layers, cdim=args.encoder_rnn_hidden_size,
+                            hdim=self.fdim, dropout=self.dropout, typ=self.encoder_type)
 
         if self.use_cpc:
             self.cpc_future_enc = LIN(self.idim, self.fdim, dropout=self.dropout)
@@ -154,30 +217,33 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             ortho_loss = ortho_reg_fn(self.encoder.fc1.weight.t())
 
         if self.decoder:
-            if masks_in is None:
-                assert (not self.masked_recon), "masked reconstruction requires nonzero in/out masks"
+            if not self.masked_recon:
                 # Normal reconstruction.
+                assert (masks_in is None) and (masks_out is None), "regular reconstruction requires no in/out masks"
                 recon = self.decoder(hs_pad)
-                recon_loss = compute_recon_mse(recon, xs_pad, hmask)
+                # recon_loss = compute_recon_mse(recon, xs_pad, hmask)
+                loss = torch.sum((recon.view([-1, self.idim]) - xs_pad.view([-1, self.idim])) ** 2, 1)
+                mask_float = src_mask.float().view([-1])
+                recon_loss = torch.sum(torch.mul(loss, mask_float)) / torch.sum(mask_float)
             else:
                 # Masked reconstruction.
-                assert self.masked_recon, "masked reconstruction requires nonzero in/out masks"
+                assert (masks_in is not None) and (masks_out is not None), "masked reconstruction requires nonzero in/out masks"
                 if not self.encoder_type == "transformer":
                     hs_pad1, _, _ = self.encoder(xs_pad * masks_in, ilens)
                 else:
                     hs_pad1, _ = self.encoder(xs_pad * masks_in, src_mask)
                     hs_pad1 = self.proj(hs_pad1, None)
                 recon_loss = torch.sum(((self.decoder(hs_pad1) - xs_pad) ** 2) * masks_out) / torch.sum(masks_out)
-
         else:
             recon_loss = 0.0
         
         #print("hs_pad:", hs_pad.shape)
         if not self.use_cpc:
-            self.cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.diag_reg)
+            self.cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.cov_diag_reg)
             pi = calc_pi_from_cov(self.cov)
             key_loss = - pi
         else:
+            # Weiran: please move this code snippet to a separate function.
             pi = 0.
             slfidx, posidx, negidx = gen_batch_indices(ilens, max(ilens), range(self.num_pos), self.num_neg, portion=1.0)
             fx = hs_pad.view(-1, hs_pad.shape[-1])
@@ -210,8 +276,8 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
 
 
 # Move training code out of model definition.
-def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False,
-             batch_size=50, max_epochs=500):
+def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, batch_size=50, max_epochs=500):
+
     if use_gpu:
         model = model.cuda()
     device = torch.device("cuda" if use_gpu else "cpu")
@@ -245,7 +311,8 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False,
             optimizer.zero_grad()
             if model.recon_lambda > 0 and model.masked_recon:
                 # Weiran: move these steps into a separate function.
-                masks_in = [spectral_masking(torch.ones_like(x), F=5, T=40).numpy() for x in x_batch_list]
+                masks_in = [spectral_masking(torch.ones_like(x), F=model.spec_mask_F, T=model.spec_mask_T,
+                    num_freq_mask=model.num_freq_mask, num_time_mask=model.num_time_mask).numpy() for x in x_batch_list]
                 masks_out = [1.0 -m for m in masks_in]
                 masks_in = [_context_concat(m, input_context) for m in masks_in]
                 masks_out = [_context_concat(m, input_context) for m in masks_out]
@@ -287,7 +354,8 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False,
 
             if model.recon_lambda > 0 and model.masked_recon:
                 # Weiran: move these steps into a separate function.
-                masks_in = [spectral_masking(torch.ones_like(x), F=5, T=40).numpy() for x in x_batch_list]
+                masks_in = [spectral_masking(torch.ones_like(x), F=model.spec_mask_F, T=model.spec_mask_T,
+                    num_freq_mask=model.num_freq_mask, num_time_mask=model.num_time_mask).numpy() for x in x_batch_list]
                 masks_out = [1.0 -m for m in masks_in]
                 masks_in = [_context_concat(m, input_context) for m in masks_in]
                 masks_out = [_context_concat(m, input_context) for m in masks_out]
