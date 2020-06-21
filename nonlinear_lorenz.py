@@ -132,6 +132,7 @@ if __name__ == "__main__":
         ddca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type=args.encoder_type,
                                                  input_context=args.input_context,
                                                  ortho_lambda=args.ortho_lambda, recon_lambda=args.recon_lambda,
+                                                 masked_recon=True,
                                                  dropout=args.dropout, block_toeplitz=False, use_cpc=args.use_cpc)
 
         ddca_model = fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, use_gpu,
@@ -165,5 +166,5 @@ if __name__ == "__main__":
               encoder_name, "figs/result_{}.pdf".format(params))
 
 """
-python3 nonlinear_lorenz.py --encoder_type dnn --dropout 0.5 --ortho_lambda 100.0
+python3 nonlinear_lorenz.py --encoder_type transformer --dropout 0.5 --ortho_lambda 10.0 --gpuid 0
 """

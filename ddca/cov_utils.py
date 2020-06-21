@@ -12,7 +12,7 @@ def torch_toeplitzify(cov, T, d, symmetrize=True):
             to_avg_lower[i] = cov[(delta_t + i) * d:(delta_t + i + 1) * d, i * d:(i + 1) * d]
             to_avg_upper[i] = cov[i * d:(i + 1) * d, (delta_t + i) * d:(delta_t + i + 1) * d]
         avg_lower = torch.mean(to_avg_lower, axis=0, device=cov.device)
-        avg_upper = torch.mean(to_avg_upper, axis=0, device=ocv.device)
+        avg_upper = torch.mean(to_avg_upper, axis=0, device=cov.device)
         if symmetrize:
             avg_lower = 0.5 * (avg_lower + avg_upper.T)
             avg_upper = avg_lower.T
@@ -98,7 +98,7 @@ def calc_cov_from_data(xs_pad, src_mask, T, toeplitzify=True, reg=0.0):
     """
     # Weiran: since we are going to remove mean later, this step is omitted.
     mask_float = src_mask.float().flatten().unsqueeze(1)
-    mean = torch.sum(torch.mul(xs_pad.view([B*maxlen, d]), mask_float), 1, keepdim=True) / torch.sum(mask_float)
+    mean = torch.sum(torch.mul(xs_pad.view([B*maxlen, d]), mask_float), 0, keepdim=True) / torch.sum(mask_float)
     xs_pad = xs_pad - mean.unsqueeze(0)
     """
 

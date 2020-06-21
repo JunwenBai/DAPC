@@ -72,7 +72,7 @@ class LIN(nn.Module):
 
 class DNN(nn.Module):
     
-    def __init__(self, n_input, n_output, dropout=0.5, h_sizes=[128, 128], reset_param=False):
+    def __init__(self, n_input, n_output, dropout=0.0, h_sizes=[128, 128], reset_param=False):
         super(DNN, self).__init__()
         self.dropout = nn.Dropout(dropout)
         self.fc_in = nn.Linear(n_input, h_sizes[0])

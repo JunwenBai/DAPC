@@ -10,6 +10,7 @@ from .solver import LIN, DNN, RNN, ortho_reg_fn
 from transformer.encoder_stoc import Encoder
 from .cov_utils import calc_cov_from_data, calc_pi_from_cov
 from .utils import make_non_pad_mask, pad_list, _context_concat, gen_batch_indices
+from .spec_augment import spectral_masking
 import pdb
 
 
@@ -63,7 +64,9 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
     """
 
     def __init__(self, idim, fdim, T, input_context=0, recon_lambda=0.0, ortho_lambda=0.0,
-                 encoder_type="dnn", block_toeplitz=True, diag_reg=1e-6, dropout=0.5, use_cpc=False, num_pos=4, num_neg=16,
+                 encoder_type="dnn", block_toeplitz=False, diag_reg=1e-6, dropout=0.5,
+                 masked_recon=False,
+                 use_cpc=False, num_pos=4, num_neg=16,
                  dtype=torch.float32, rng_or_seed=None):
         super(DynamicalComponentsAnalysis, self).__init__()
         self.input_context = input_context
@@ -71,6 +74,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         self.fdim = fdim
         self.T = T
         self.recon_lambda = recon_lambda
+        self.masked_recon = masked_recon
         self.ortho_lambda = ortho_lambda
         self.dropout = dropout
         self.use_cpc = use_cpc
@@ -120,7 +124,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         else:
             self.decoder = None
 
-    def forward(self, xs_pad, ilens):
+    def forward(self, xs_pad, ilens, masks_in=None, masks_out=None):
         """ forward.
 
         :param torch.Tensor xs_pad: batch of padded source sequences (B, maxlen, idim)
@@ -143,7 +147,6 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             hs_pad, hmask = self.encoder(xs_pad, src_mask)
             hs_pad = self.proj(hs_pad, None)
             hmask = hmask[:, 0, :]
-            olens = torch.sum(hmask.long(), 1)
 
         # Compute cov matrix.
         ortho_loss, self.cov_frame = ortho_reg_Y(hs_pad, hmask)
@@ -151,8 +154,21 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             ortho_loss = ortho_reg_fn(self.encoder.fc1.weight.t())
 
         if self.decoder:
-            recon, _, _ = self.decoder(hs_pad, olens)
-            recon_loss = compute_recon_mse(recon, xs_pad, hmask)
+            if masks_in is None:
+                assert (not self.masked_recon), "masked reconstruction requires nonzero in/out masks"
+                # Normal reconstruction.
+                recon = self.decoder(hs_pad)
+                recon_loss = compute_recon_mse(recon, xs_pad, hmask)
+            else:
+                # Masked reconstruction.
+                assert self.masked_recon, "masked reconstruction requires nonzero in/out masks"
+                if not self.encoder_type == "transformer":
+                    hs_pad1, _, _ = self.encoder(xs_pad * masks_in, ilens)
+                else:
+                    hs_pad1, _ = self.encoder(xs_pad * masks_in, src_mask)
+                    hs_pad1 = self.proj(hs_pad1, None)
+                recon_loss = torch.sum(((self.decoder(hs_pad1) - xs_pad) ** 2) * masks_out) / torch.sum(masks_out)
+
         else:
             recon_loss = 0.0
         
@@ -221,13 +237,25 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False,
         for i in range(n_batch_train):
             idx_batch = list(order[i * batch_size: min((i + 1) * batch_size, n_train)])
 
-            x_batch = [torch.from_numpy(_context_concat(X_train[_], input_context)).float() for _ in idx_batch]
-            l_batch = [L_train[_] for _ in idx_batch]
-            total_len_batch = sum(l_batch)
-            x_batch, l_batch = pad_list(x_batch, 0.0).to(device), torch.Tensor(l_batch).long().to(device)
+            x_batch_list = [torch.from_numpy(_context_concat(X_train[_], input_context)).float() for _ in idx_batch]
+            l_batch_list = [L_train[_] for _ in idx_batch]
+            total_len_batch = sum(l_batch_list)
+            x_batch, l_batch = pad_list(x_batch_list, 0.0).to(device), torch.Tensor(l_batch_list).long().to(device)
 
             optimizer.zero_grad()
-            loss, pi, loss_orth, loss_recon, _ = model(x_batch, l_batch)
+            if model.recon_lambda > 0 and model.masked_recon:
+                # Weiran: move these steps into a separate function.
+                masks_in = [spectral_masking(torch.ones_like(x), F=5, T=40).numpy() for x in x_batch_list]
+                masks_out = [1.0 -m for m in masks_in]
+                masks_in = [_context_concat(m, input_context) for m in masks_in]
+                masks_out = [_context_concat(m, input_context) for m in masks_out]
+                masks_in = pad_list([torch.from_numpy(x).float() for x in masks_in], 0).to(device)
+                masks_out = pad_list([torch.from_numpy(x).float() for x in masks_out], 0).to(device)
+                loss, pi, loss_orth, loss_recon, cov_frame = model(x_batch, l_batch, masks_in, masks_out)
+            else:
+                loss, pi, loss_orth, loss_recon, cov_frame = model(x_batch, l_batch)
+
+            # loss, pi, loss_orth, loss_recon, _ = model(x_batch, l_batch)
             #print("minibatch %03d/%03d: pi=%f" % (i, n_batch_train, pi))
             loss.backward()
             loss.detach()
@@ -252,12 +280,22 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False,
         total_loss_recon = 0.0
         total_cov_frame = np.zeros([model.fdim, model.fdim])
         for i in range(int(math.ceil(n_valid / batch_size))):
-            x_batch = [torch.from_numpy(_context_concat(X_valid[_],input_context)).float() for _ in range(i*batch_size, min((i+1)*batch_size, n_valid))]
-            l_batch = [L_valid[_] for _ in range(i*batch_size, min((i+1)*batch_size, n_valid))]
-            total_len_batch = sum(l_batch)
-            x_batch, l_batch = pad_list(x_batch, 0.0).to(device), torch.Tensor(l_batch).long().to(device)
+            x_batch_list = [torch.from_numpy(_context_concat(X_valid[_],input_context)).float() for _ in range(i*batch_size, min((i+1)*batch_size, n_valid))]
+            l_batch_list = [L_valid[_] for _ in range(i*batch_size, min((i+1)*batch_size, n_valid))]
+            total_len_batch = sum(l_batch_list)
+            x_batch, l_batch = pad_list(x_batch_list, 0.0).to(device), torch.Tensor(l_batch_list).long().to(device)
 
-            loss, pi, loss_orth, loss_recon, cov_frame = model(x_batch, l_batch)
+            if model.recon_lambda > 0 and model.masked_recon:
+                # Weiran: move these steps into a separate function.
+                masks_in = [spectral_masking(torch.ones_like(x), F=5, T=40).numpy() for x in x_batch_list]
+                masks_out = [1.0 -m for m in masks_in]
+                masks_in = [_context_concat(m, input_context) for m in masks_in]
+                masks_out = [_context_concat(m, input_context) for m in masks_out]
+                masks_in = pad_list([torch.from_numpy(x).float() for x in masks_in], 0).to(device)
+                masks_out = pad_list([torch.from_numpy(x).float() for x in masks_out], 0).to(device)
+                loss, pi, loss_orth, loss_recon, cov_frame = model(x_batch, l_batch, masks_in, masks_out)
+            else:
+                loss, pi, loss_orth, loss_recon, cov_frame = model(x_batch, l_batch)
             #print("minibatch %03d/%03d: pi=%f" % (i, n_batch_valid, pi))
 
             total_loss += loss.detach()
