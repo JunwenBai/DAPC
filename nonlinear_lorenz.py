@@ -11,7 +11,7 @@ from ddca.ddca import DynamicalComponentsAnalysis
 from ddca.ddca import fit_ddca
 from ddca.utils import _context_concat, parsegpuid
 from ddca.data_gen import gen_nonlinear_noisy_lorenz, gen_lorenz_data
-from ddca.data_process import smoothen, match, split, chunk_long_seq
+from ddca.data_process import match, split, chunk_long_seq
 from ddca.solver import LIN, DNN, KERNEL
 from ddca.plotting import plot_figs
 from dca import DynamicalComponentsAnalysis as Linear_DCA
@@ -96,14 +96,15 @@ if __name__ == "__main__":
 
         # Linear DCA
         print("Training {}".format(args.base_encoder_type))
-        '''opt = Linear_DCA(T=T, d=3, use_scipy=False, block_toeplitz=False, ortho_lambda=10., init="random_ortho",
+        '''
+        opt = Linear_DCA(T=T, d=3, use_scipy=False, block_toeplitz=False, ortho_lambda=10., init="random_ortho",
                   max_epochs=1500, device="cpu")
         opt.fit(X_noisy_train, X_noisy_val, X_dyn_val, writer)
         V_dca = opt.coef_  # transformation matrix
         X_dca = np.dot(X_noisy_val, V_dca)  # recontructed 3-d signals: X_dca
         X_dca = X_dca[:500, :]
-        # X_dca = smoothen(X_dca)
-        X_dca_recon = match(X_dca, X_dyn_val[:500], 15000, device)'''
+        X_dca_recon = match(X_dca, X_dyn_val[:500], 15000, device)
+        '''
         
         if args.base_encoder_type != "lin":
             dca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type=args.base_encoder_type,
@@ -135,7 +136,7 @@ if __name__ == "__main__":
                                                  masked_recon=True,
                                                  dropout=args.dropout, block_toeplitz=False, use_cpc=args.use_cpc)
 
-        ddca_model = fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, use_gpu,
+        ddca_model = fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs, L_valid, writer, use_gpu,
                               batch_size=args.batchsize, max_epochs=args.epochs)
 
         #X_ddca = ddca_model.encode(torch.from_numpy(_context_concat(X_valid_seqs[0], args.input_context)).float().to(device, dtype=ddca_model.dtype)).detach().cpu().numpy()
@@ -144,7 +145,6 @@ if __name__ == "__main__":
             X_ddca = TSNE(n_components=3).fit_transform(X_ddca)
         print(X_ddca)
         print(np.matmul((X_ddca - X_ddca.mean(0)).T, (X_ddca - X_ddca.mean(0))) / X_ddca.shape[0])
-        # X_ddca = smoothen(X_ddca)
 
         # match d-DCA with ground-truth
         print("Matching {}".format(encoder_name))

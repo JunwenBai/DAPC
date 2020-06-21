@@ -2,6 +2,7 @@
 
 def spectral_masking(spec, F=30, T=40, num_freq_masks=2, num_time_masks=2):
     # Weiran: I am removing the warping part which is costly.
+    # And replace with zero is needed for multiplicative masks to work.
     return time_mask(freq_mask(
         spec,
         F=F, num_masks=num_freq_masks, replace_with_zero=True),
