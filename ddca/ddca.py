@@ -183,7 +183,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
 
         # Weiran: based on my experience, reconstruction network would better be a DNN than RNNs.
         if self.recon_lambda > 0:
-            self.decoder = DNN(self.fdim, self.idim, h_sizes=[512, 512], dropout=self.dropout)
+            self.decoder = DNN(self.fdim, self.idim, h_sizes=[args.encoder_dnn_hidden_size] * args.encoder_dnn_num_layers, dropout=self.dropout)
         else:
             self.decoder = None
 
@@ -223,7 +223,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                 recon = self.decoder(hs_pad)
                 # recon_loss = compute_recon_mse(recon, xs_pad, hmask)
                 loss = torch.sum((recon.view([-1, self.idim]) - xs_pad.view([-1, self.idim])) ** 2, 1)
-                mask_float = src_mask.float().view([-1])
+                mask_float = hmask.float().view([-1])
                 recon_loss = torch.sum(torch.mul(loss, mask_float)) / torch.sum(mask_float)
             else:
                 # Masked reconstruction.

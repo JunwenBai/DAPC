@@ -27,8 +27,8 @@ def get_parser():
 
     parser.add_argument("--fdim", default=3, help="Dimensionality of features", type=int)
     parser.add_argument("--T", default=4, help="Time steps for estimating PI", type=int)
-    parser.add_argument("--ortho_lambda", default=10.0, help="Regularization parameter for orthogonality", type=float)
-    parser.add_argument("--recon_lambda", default=10.0, help="Regularization parameter for reconstruction", type=float)
+    parser.add_argument("--ortho_lambda", default=0.0, help="Regularization parameter for orthogonality", type=float)
+    parser.add_argument("--recon_lambda", default=0.0, help="Regularization parameter for reconstruction", type=float)
     parser.add_argument("--dropout", default=0.0, help="Dropout probability of networks.", type=float)
     parser.add_argument("--batchsize", default=20, help="Number of sequences in each minibatch", type=int)
     parser.add_argument("--encoder_type", default="lin", type=str, choices=["lin", "transformer", "dnn", "gru", "lstm", "bgru", "blstm"])
@@ -114,11 +114,13 @@ def main(args):
         if args.base_encoder_type != "lin":
             dca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type=args.base_encoder_type,
                                                     ortho_lambda=args.ortho_lambda, recon_lambda=args.recon_lambda,
-                                                    dropout=args.dropout, use_cpc=args.use_cpc, masked_recon=args.masked_recon)
+                                                    dropout=args.dropout, use_cpc=args.use_cpc, masked_recon=args.masked_recon,
+                                                    args=args)
         else:
             dca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type="lin",
                                                     ortho_lambda=10.0, recon_lambda=0.0,
-                                                    dropout=0.0, use_cpc=False, masked_recon=False)
+                                                    dropout=0.0, use_cpc=False, masked_recon=False,
+                                                    args=args)
         dca_model = fit_ddca(dca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, use_gpu,
                               batch_size=args.batchsize, max_epochs=50)
 
@@ -135,7 +137,8 @@ def main(args):
         print("Training {}".format(encoder_name))
         ddca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type=args.encoder_type,
                                                  ortho_lambda=args.ortho_lambda, recon_lambda=args.recon_lambda,
-                                                 dropout=args.dropout, use_cpc=args.use_cpc, masked_recon=args.masked_recon)
+                                                 dropout=args.dropout, use_cpc=args.use_cpc, masked_recon=args.masked_recon,
+                                                 args=args)
 
         ddca_model = fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs, L_valid, writer, use_gpu,
                               batch_size=args.batchsize, max_epochs=args.epochs)
@@ -171,5 +174,5 @@ def main(args):
 if __name__ == "__main__":
     main(sys.argv[1:])
 """
-python3 nonlinear_lorenz.py --encoder_type transformer --dropout 0.5 --ortho_lambda 10.0 --recon_lambda 10.0 --gpuid 0
+python3 nonlinear_lorenz.py --encoder_type bgru --dropout 0.5 --ortho_lambda 10.0 --recon_lambda 10.0 --gpuid 0
 """
