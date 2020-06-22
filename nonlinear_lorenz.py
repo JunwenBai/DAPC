@@ -38,6 +38,7 @@ def get_parser():
     parser.add_argument('--masked_recon', default=False, type=strtobool, help='Whether to use masked reconstruction loss')
     parser.add_argument("--gpuid", default="0", help="ID of gpu device to be used", type=str)
     parser.add_argument("--seed", default=0, help="Random seed", type=int)
+    parser.add_argument('--use_vae', default=False, type=strtobool, help='Whether to use VAE instead of AE')
     return parser
 
 
@@ -115,7 +116,7 @@ def main(args):
             dca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type=args.base_encoder_type,
                                                     ortho_lambda=args.ortho_lambda, recon_lambda=args.recon_lambda,
                                                     dropout=args.dropout, use_cpc=args.use_cpc, masked_recon=args.masked_recon,
-                                                    args=args)
+                                                    use_vae=args.use_vae, n_data=len(X_noisy_train), args=args)
         else:
             dca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type="lin",
                                                     ortho_lambda=10.0, recon_lambda=0.0,
@@ -130,15 +131,12 @@ def main(args):
         if X_dca.shape[1] > 3:
             X_dca = TSNE(n_components=3).fit_transform(X_dca)
 
-        print("Matching {}".format(args.base_encoder_type))
-        X_dca_recon = match(X_dca, X_dyn_val[:500], 15000, device)
-
         # deep DCA
         print("Training {}".format(encoder_name))
         ddca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type=args.encoder_type,
                                                  ortho_lambda=args.ortho_lambda, recon_lambda=args.recon_lambda,
                                                  dropout=args.dropout, use_cpc=args.use_cpc, masked_recon=args.masked_recon,
-                                                 args=args)
+                                                 use_vae=args.use_vae, n_data=len(X_noisy_train), args=args)
 
         ddca_model = fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs, L_valid, writer, use_gpu,
                               batch_size=args.batchsize, max_epochs=args.epochs)
@@ -151,6 +149,9 @@ def main(args):
         print(X_ddca)
         print(np.matmul((X_ddca - X_ddca.mean(0)).T, (X_ddca - X_ddca.mean(0))) / X_ddca.shape[0])
 
+        # match DCA with ground-truth
+        print("Matching {}".format(args.base_encoder_type))
+        X_dca_recon = match(X_dca, X_dyn_val[:500], 15000, device)
         # match d-DCA with ground-truth
         print("Matching {}".format(encoder_name))
         X_ddca_recon = match(X_ddca, X_dyn_val[:500], 15000, device)

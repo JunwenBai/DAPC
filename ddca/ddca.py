@@ -10,6 +10,7 @@ from transformer.encoder_stoc import Encoder
 from .cov_utils import calc_cov_from_data, calc_pi_from_cov
 from .utils import make_non_pad_mask, pad_list, _context_concat, gen_batch_indices
 from .spec_augment import spectral_masking
+from .vae import btcvae_loss
 from distutils.util import strtobool
 import pdb
 
@@ -103,7 +104,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         # Covariance regularization.
         group.add_argument('--block_toeplitz', default=False, type=strtobool,
                            help='Whether to Toeplitzify the covariance matrix')
-        group.add_argument('--cov_diag_reg', default=0.0, type=float,
+        group.add_argument('--cov_diag_reg', default=1e-6, type=float,
                            help='Constants added to the diagonal of covariance matrix')
 
         # Input.
@@ -124,13 +125,14 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         return parser
 
     def __init__(self, idim, fdim, T, encoder_type, ortho_lambda, recon_lambda, dropout,
-                 use_cpc, masked_recon, args, dtype=torch.float32):
+                 use_cpc, masked_recon, args, use_vae=False, n_data=None, dtype=torch.float32):
         super(DynamicalComponentsAnalysis, self).__init__()
 
         # Splicing options.
         self.input_context = args.input_context
         self.idim = idim * (1+2*self.input_context)
         self.fdim = fdim
+        self.n_data = n_data
 
         # Model params.
         self.T = T
@@ -149,12 +151,16 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         self.num_freq_masks = args.num_freq_masks
         self.num_time_masks = args.num_time_masks
 
+        # VAE params
+        self.use_vae = use_vae
+
         # CPC params.
         self.use_cpc = use_cpc
         self.num_pos = args.num_pos
         self.num_neg = args.num_neg
 
         if self.encoder_type == "lin":
+            assert (not self.use_vae), "linear model cannot use VAE structure"
             self.encoder = LIN(self.idim, self.fdim, dropout=self.dropout)
         else:
             if self.encoder_type == "transformer":
@@ -166,17 +172,17 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                     num_blocks=args.elayers,
                     input_layer=args.transformer_input_layer,
                     dropout_rate=self.dropout,  # args.dropout_rate,
-                    death_rate=args.edeath_rate
+                    death_rate=args.edeath_rate,
                 )
-                self.proj = LIN(args.adim, self.fdim, dropout=self.dropout)
+                self.proj = LIN(args.adim, self.fdim if not self.use_vae else self.fdim*2, dropout=self.dropout)
             else:
                 if self.encoder_type == "dnn":
                     self.encoder = DNN(self.idim, self.fdim,
-                            h_sizes=[args.encoder_dnn_hidden_size] * args.encoder_dnn_num_layers, dropout=self.dropout)
+                            h_sizes=[args.encoder_dnn_hidden_size] * args.encoder_dnn_num_layers, dropout=self.dropout, use_vae=self.use_vae)
                 else:
                     # Choices are ['lstm', 'gru', 'blstm', 'bgru'].
                     self.encoder = RNN(idim=self.idim, elayers=args.encoder_rnn_num_layers, cdim=args.encoder_rnn_hidden_size,
-                            hdim=self.fdim, dropout=self.dropout, typ=self.encoder_type)
+                            hdim=self.fdim, dropout=self.dropout, typ=self.encoder_type, use_vae=self.use_vae)
 
         if self.use_cpc:
             self.cpc_future_enc = LIN(self.idim, self.fdim, dropout=self.dropout)
@@ -186,6 +192,19 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             self.decoder = DNN(self.fdim, self.idim, h_sizes=[args.encoder_dnn_hidden_size] * args.encoder_dnn_num_layers, dropout=self.dropout)
         else:
             self.decoder = None
+
+    def vae_latent(self, hs_pad):
+        latent_dim = hs_pad.shape[-1]
+        half_dim = latent_dim//2
+        mu = hs_pad[:, :, :half_dim].contiguous()
+        logvar = hs_pad[:, :, half_dim:].contiguous()
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        samples = mu + eps * std
+
+        #kld = - 0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        latent_loss = btcvae_loss((mu.view(-1, half_dim), logvar.view(-1, half_dim)), samples.view(-1, half_dim), n_data=self.n_data, is_mss=False, alpha=1., beta=6.)
+        return latent_loss, mu, samples
 
     def forward(self, xs_pad, ilens, masks_in=None, masks_out=None):
         """ forward.
@@ -212,9 +231,12 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             hmask = hmask[:, 0, :]
 
         # Compute cov matrix.
-        ortho_loss, self.cov_frame = ortho_reg_Y(hs_pad, hmask)
+        ortho_loss, self.cov_frame = ortho_reg_Y(hs_pad, hmask) if not self.use_vae else ortho_reg_Y(hs_pad[:, :, :hs_pad.shape[-1]//2], hmask)
         if self.encoder_type == "lin":
             ortho_loss = ortho_reg_fn(self.encoder.fc1.weight.t())
+        elif self.use_vae:
+            latent_loss, hs_pad_mu, hs_pad = self.vae_latent(hs_pad)
+            ortho_loss = latent_loss
 
         if self.decoder:
             if not self.masked_recon:
@@ -233,11 +255,15 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                 else:
                     hs_pad1, _ = self.encoder(xs_pad * masks_in, src_mask)
                     hs_pad1 = self.proj(hs_pad1, None)
+                if self.use_vae:
+                    _, _, hs_pad1 = self.vae_latent(hs_pad1)
                 recon_loss = torch.sum(((self.decoder(hs_pad1) - xs_pad) ** 2) * masks_out) / torch.sum(masks_out)
         else:
             recon_loss = 0.0
         
-        #print("hs_pad:", hs_pad.shape)
+        #if self.use_vae:
+        #    hs_pad = hs_pad_mu
+
         if not self.use_cpc:
             self.cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.cov_diag_reg)
             pi = calc_pi_from_cov(self.cov)
@@ -272,6 +298,8 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         else:
             enc_output, _ = self.encoder(x.unsqueeze(0), None)
             hs_pad = self.proj(enc_output, None)
+        if self.use_vae:
+            _, hs_pad, _ = self.vae_latent(hs_pad)
         return hs_pad.squeeze(0).detach()
 
 
