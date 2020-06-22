@@ -103,7 +103,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         # Covariance regularization.
         group.add_argument('--block_toeplitz', default=False, type=strtobool,
                            help='Whether to Toeplitzify the covariance matrix')
-        group.add_argument('--cov_diag_reg', default=0.0, type=float,
+        group.add_argument('--cov_diag_reg', default=1e-6, type=float,
                            help='Constants added to the diagonal of covariance matrix')
 
         # Input.
