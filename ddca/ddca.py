@@ -270,7 +270,9 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             key_loss = - pi
         else:
             # Weiran: please move this code snippet to a separate function.
-            pi = 0.
+            self.cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.cov_diag_reg)
+            pi = calc_pi_from_cov(self.cov)
+
             slfidx, posidx, negidx = gen_batch_indices(ilens, max(ilens), range(self.num_pos), self.num_neg, portion=1.0)
             fx = hs_pad.view(-1, hs_pad.shape[-1])
             gy = self.cpc_future_enc(xs_pad.view(-1, xs_pad.shape[-1]))
