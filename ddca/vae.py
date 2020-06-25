@@ -13,7 +13,7 @@ def vdca_loss(latent_dist, latent_sample, mu, chol, T, n_data, alpha=0., beta=0.
     ### Junwen: compute the log prob terms for each 3*3 block
     log_pz, log_qz, log_prod_qzi, log_q_zCx = _get_log_pz_qz_prodzi_qzCx(latent_sample, latent_dist, n_data, is_mss=False)
     block_tc_loss = (log_qz - log_prod_qzi).mean()
-    block_mi_loss = (log_q_zCx -log_qz).mean()
+    block_mi_loss = (log_q_zCx - log_qz).mean()
     ###
 
     ### Junwen: compute the log prob terms for each 24*24 block

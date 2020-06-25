@@ -132,7 +132,11 @@ def main(args):
             dca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type=args.base_encoder_type,
                                                     ortho_lambda=args.ortho_lambda, recon_lambda=args.recon_lambda,
                                                     dropout=args.dropout, use_cpc=args.use_cpc, masked_recon=args.masked_recon,
+<<<<<<< HEAD
                                                     use_vae=args.use_vae, n_data=len(X_noisy_train), args=args, device=device)
+=======
+                                                    use_vae=args.use_vae, n_data=len(X_noisy_train), args=args)
+>>>>>>> 8deedd1baaf2d5bf89ba701653c373c806927dc3
         else:
             dca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type="lin",
                                                     ortho_lambda=10.0, recon_lambda=0.0,
@@ -152,11 +156,16 @@ def main(args):
         ddca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type=args.encoder_type,
                                                  ortho_lambda=args.ortho_lambda, recon_lambda=args.recon_lambda,
                                                  dropout=args.dropout, use_cpc=args.use_cpc, masked_recon=args.masked_recon,
+<<<<<<< HEAD
                                                  use_vae=args.use_vae, n_data=len(X_noisy_train), args=args, device=device)
      
         #for name, param in ddca_model.named_parameters():
         #    print(name, param.shape, param.requires_grad)
         
+=======
+                                                 use_vae=args.use_vae, n_data=len(X_noisy_train), args=args)
+
+>>>>>>> 8deedd1baaf2d5bf89ba701653c373c806927dc3
         ddca_model = fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs, L_valid, writer, use_gpu,
                               batch_size=args.batchsize, max_epochs=args.epochs, device=device)
 
@@ -167,6 +176,7 @@ def main(args):
             X_ddca = TSNE(n_components=3).fit_transform(X_ddca)
         print(X_ddca)
         print(np.matmul((X_ddca - X_ddca.mean(0)).T, (X_ddca - X_ddca.mean(0))) / X_ddca.shape[0])
+<<<<<<< HEAD
         #print("------------------")
         #print(ddca_model.hs_mean)
         #print("------------------")
@@ -176,6 +186,8 @@ def main(args):
         plt.savefig("pngs/cov_heat_{}.png".format(params))
         #torch.save(ddca_model.hs_mean, "pts/hs_mean.pt")
         #torch.save(ddca_model.cov, "pts/cov.pt")
+=======
+>>>>>>> 8deedd1baaf2d5bf89ba701653c373c806927dc3
 
         # match DCA with ground-truth
         print("Matching {}".format(args.base_encoder_type))
