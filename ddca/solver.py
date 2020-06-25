@@ -72,7 +72,7 @@ class LIN(nn.Module):
 
 class DNN(nn.Module):
     
-    def __init__(self, n_input, n_output, dropout=0.0, h_sizes=[128, 128], reset_param=False):
+    def __init__(self, n_input, n_output, dropout=0.0, h_sizes=[128, 128], reset_param=False, use_vae=False):
         super(DNN, self).__init__()
         self.dropout = nn.Dropout(dropout)
         self.fc_in = nn.Linear(n_input, h_sizes[0])
@@ -80,7 +80,7 @@ class DNN(nn.Module):
         self.n_layers = len(h_sizes)
         for i in range(1, self.n_layers):
             self.hidden.append(nn.Linear(h_sizes[i-1], h_sizes[i]))
-        self.fc_out = nn.Linear(h_sizes[-1], n_output)
+        self.fc_out = nn.Linear(h_sizes[-1], n_output if not use_vae else n_output*2)
         if reset_param:
             self.reset_parameters()
         
@@ -112,7 +112,7 @@ class RNN(torch.nn.Module):
     :param str typ: The RNN type
     """
 
-    def __init__(self, idim, elayers, cdim, hdim, dropout, typ="blstm"):
+    def __init__(self, idim, elayers, cdim, hdim, dropout, typ="blstm", use_vae=False):
         super(RNN, self).__init__()
         bidir = typ[0] == "b"
         self.nbrnn = torch.nn.LSTM(idim, cdim, elayers, batch_first=True,
@@ -120,9 +120,9 @@ class RNN(torch.nn.Module):
             else torch.nn.GRU(idim, cdim, elayers, batch_first=True, dropout=dropout,
                               bidirectional=bidir)
         if bidir:
-            self.l_last = torch.nn.Linear(cdim * 2, hdim)
+            self.l_last = torch.nn.Linear(cdim * 2, hdim if not use_vae else hdim*2)
         else:
-            self.l_last = torch.nn.Linear(cdim, hdim)
+            self.l_last = torch.nn.Linear(cdim, hdim if not use_vae else hdim*2)
         self.typ = typ
 
     def forward(self, xs_pad, ilens, prev_state=None):
