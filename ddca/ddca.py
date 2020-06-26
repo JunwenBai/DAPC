@@ -268,6 +268,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         # Weiran: for now, both RNN and TRANSFORMER do not reduce the input lengths.
         hs_pad, olens = self.encoder(xs_pad, ilens)
         hmask = make_non_pad_mask(olens.tolist()).to(xs_pad.device)
+        rate_loss = 0.
 
         # Let us change the ortho_loss into latent loss, as they are loss in the feature space.
         if self.use_vae:
@@ -322,7 +323,6 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                                     alpha=self.vae_alpha, beta=self.vae_beta, gamma=self.vae_gamma, zeta=self.vae_zeta)
             '''
             rate_loss = vdca_rate_loss((mu, logvar), hs_pad, hmask, self.T, self.cov)
-            ortho_loss = rate_loss
             # Weiran: according "Fixing a broken ELBO" and beta-VAE, the beta is ratio between rate and log-likelihood.
             key_loss = -pi + self.vae_beta * self.recon_lambda * rate_loss
         else:
@@ -330,7 +330,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             key_loss = -pi + self.ortho_lambda * ortho_loss
 
         self.loss = key_loss + self.recon_lambda * recon_loss
-        return self.loss, float(pi), float(ortho_loss), float(recon_loss), (self.cov_frame).detach().cpu().numpy(), (self.cov).detach().cpu().numpy()
+        return self.loss, float(pi), float(ortho_loss), float(recon_loss), float(rate_loss), (self.cov_frame).detach().cpu().numpy(), (self.cov).detach().cpu().numpy()
 
 
     def encode(self, x):
@@ -367,6 +367,7 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, b
         total_pi = 0.0
         total_ortho_loss = 0.0
         total_loss_recon = 0.0
+        total_loss_rate = 0.0
         
         for i in range(n_batch_train):
             idx_batch = list(order[i * batch_size: min((i + 1) * batch_size, n_train)])
@@ -387,9 +388,9 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, b
                 masks_out = [_context_concat(m, input_context) for m in masks_out]
                 masks_in = pad_list([torch.from_numpy(x).float() for x in masks_in], 0).to(device)
                 masks_out = pad_list([torch.from_numpy(x).float() for x in masks_out], 0).to(device)
-                loss, pi, loss_orth, loss_recon, cov_frame, cov = model(x_batch, l_batch, masks_in, masks_out)
+                loss, pi, loss_orth, loss_recon, loss_rate, cov_frame, cov = model(x_batch, l_batch, masks_in, masks_out)
             else:
-                loss, pi, loss_orth, loss_recon, cov_frame, cov = model(x_batch, l_batch)
+                loss, pi, loss_orth, loss_recon, loss_rate, cov_frame, cov = model(x_batch, l_batch)
 
             # loss, pi, loss_orth, loss_recon, _ = model(x_batch, l_batch)
             #print("minibatch %03d/%03d: pi=%f" % (i, n_batch_train, pi))
@@ -402,24 +403,27 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, b
 
             total_loss += loss
             total_pi += pi
-            total_ortho_loss += loss_orth
+            total_ortho_loss += loss_orth * total_len_batch
             total_loss_recon += loss_recon * total_len_batch
+            total_loss_rate += loss_rate * total_len_batch
 
         #print(torch.matmul(model.chol, model.chol.t())[:6, :6])
         #print(model.chol[:6, :6])
 
         avg_loss_train = total_loss / n_batch_train
         avg_pi_train = total_pi / n_batch_train
-        avg_ortho_loss_train = total_ortho_loss / n_batch_train
+        avg_ortho_loss_train = total_ortho_loss / sum(L_train)
         avg_recon_loss_train = total_loss_recon / sum(L_train)
-        print("epoch %d, train avg loss=%f, pi=%f, ortho_loss=%f, recon_loss=%f" %
-              (epoch, avg_loss_train, avg_pi_train, avg_ortho_loss_train, avg_recon_loss_train))
+        avg_rate_loss_train = total_loss_rate / sum(L_train)
+        print("epoch %d, train avg loss=%f, pi=%f, ortho_loss=%f, recon_loss=%f, rate_loss=%f" %
+              (epoch, avg_loss_train, avg_pi_train, avg_ortho_loss_train, avg_recon_loss_train, avg_rate_loss_train))
 
         model.eval()
         total_loss = 0.0
         total_pi = 0.0
         total_ortho_loss = 0.0
         total_loss_recon = 0.0
+        total_loss_rate = 0.0
         total_cov_frame = np.zeros([model.fdim, model.fdim])
         total_cov = np.zeros([2*model.fdim*model.T, 2*model.fdim*model.T])
 
@@ -438,26 +442,28 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, b
                 masks_out = [_context_concat(m, input_context) for m in masks_out]
                 masks_in = pad_list([torch.from_numpy(x).float() for x in masks_in], 0).to(device)
                 masks_out = pad_list([torch.from_numpy(x).float() for x in masks_out], 0).to(device)
-                loss, pi, loss_orth, loss_recon, cov_frame, cov = model(x_batch, l_batch, masks_in, masks_out)
+                loss, pi, loss_orth, loss_recon, loss_rate, cov_frame, cov = model(x_batch, l_batch, masks_in, masks_out)
             else:
-                loss, pi, loss_orth, loss_recon, cov_frame, cov = model(x_batch, l_batch)
+                loss, pi, loss_orth, loss_recon, loss_rate, cov_frame, cov = model(x_batch, l_batch)
             #print("minibatch %03d/%03d: pi=%f" % (i, n_batch_valid, pi))
 
             total_loss += loss.detach()
             total_pi += pi
-            total_ortho_loss += loss_orth
+            total_ortho_loss += loss_orth * total_len_batch
             total_loss_recon += loss_recon * total_len_batch
+            total_loss_rate += loss_rate * total_len_batch
             total_cov_frame += cov_frame * total_len_batch
             total_cov += cov * total_len_batch
 
         avg_loss_valid = total_loss / n_batch_valid
         avg_pi_valid = total_pi / n_batch_valid
-        avg_ortho_loss_valid = total_ortho_loss / n_batch_valid
+        avg_ortho_loss_valid = total_ortho_loss / sum(L_valid)
         avg_recon_loss_valid = total_loss_recon / sum(L_valid)
+        avg_rate_loss_valid = total_loss_rate / sum(L_valid)
         avg_cov_frame = total_cov_frame / sum(L_valid)
         avg_cov = total_cov / sum(L_valid)
-        print("epoch %d, valid avg loss=%f, pi=%f, ortho_loss=%f, recon_loss=%f" %
-              (epoch, avg_loss_valid, avg_pi_valid, avg_ortho_loss_valid, avg_recon_loss_valid))
+        print("epoch %d, valid avg loss=%f, pi=%f, ortho_loss=%f, recon_loss=%f, rate_loss=%f" %
+              (epoch, avg_loss_valid, avg_pi_valid, avg_ortho_loss_valid, avg_recon_loss_valid, avg_rate_loss_valid))
         print(avg_cov_frame)
 
         # Write stats.
