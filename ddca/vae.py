@@ -7,25 +7,26 @@ from torch.distributions.multivariate_normal import MultivariateNormal as MVN
 from .math import log_density_gaussian, log_importance_weight_matrix, matrix_log_density_gaussian
 
 def vdca_rate_loss(latent_dist, latent_sample, hmask, T, cov):
-    latent_mu, latent_logvar = latent_dist
+    latent_mu, latent_logvar = latent_dist # 20*500*3
     batch_size, seq_len, d = latent_sample.shape
     # hmask is of shape (batch_size, seq_len)
 
     # calculate log q(z|x)
-    latent_sample = latent_sample.view(batch_size, seq_len*d).unfold(1, 2 * T * d, d)  # [20, 493, 24]
-    latent_mu = latent_mu.view(batch_size, seq_len*d).unfold(1, 2 * T * d, d)
-    latent_logvar = latent_logvar.view(batch_size, seq_len*d).unfold(1, 2 * T * d, d)
-    hmask_unfold = hmask.float().unfold(1, 2 * T, 1).view(-1)
-    log_q_zCx = log_density_gaussian(latent_sample.view(-1, d), latent_mu.view(-1, d), latent_logvar.view(-1, d))
+    latent_sample = latent_sample.view(batch_size, seq_len*d).unfold(1, 2 * T * d, d).contiguous()  # [20, 493, 24]
+    latent_mu = latent_mu.view(batch_size, seq_len*d).unfold(1, 2 * T * d, d).contiguous()
+    latent_logvar = latent_logvar.view(batch_size, seq_len*d).unfold(1, 2 * T * d, d).contiguous()
+    hmask_unfold = hmask.float().unfold(1, 2 * T, 1).contiguous().mean(-1)
+    #log_q_zCx = log_density_gaussian(latent_sample.view(-1, d), latent_mu.view(-1, d), latent_logvar.view(-1, d))
+    log_q_zCx = log_density_gaussian(latent_sample, latent_mu, latent_logvar).sum(dim=2) # 20*493
 
     # calculate log p(z)
     mvn = MVN(torch.zeros(2 * T * d, device=cov.device), covariance_matrix=cov)
-    log_pz = mvn.log_prob(latent_sample)
+    log_pz = mvn.log_prob(latent_sample) # 20*493
 
     # Here I am using a naive implementation of KL.
-    rates = torch.exp(log_q_zCx) * (log_q_zCx - log_pz)
+    # rates = torch.exp(log_q_zCx) * (log_q_zCx - log_pz)
+    rates = log_q_zCx - log_pz
     return torch.sum(rates * hmask_unfold) / torch.sum(hmask_unfold)
-
 
 
 def vdca_loss_junwen(latent_dist, latent_sample, mu, chol, T, n_data, alpha=0., beta=0., gamma=1., zeta=1.):
@@ -39,11 +40,13 @@ def vdca_loss_junwen(latent_dist, latent_sample, mu, chol, T, n_data, alpha=0., 
     ###
 
     ### Junwen: compute the log prob terms for each 24*24 block
-    log_q_zCx = log_density_gaussian(latent_sample.view(-1, d), latent_mu.view(-1, d), latent_logvar.view(-1, d)).sum(dim=1).view(batch_size, -1).unfold(1, 2*T, 1).sum(2)
+    #log_q_zCx = log_density_gaussian(latent_sample.view(-1, d), latent_mu.view(-1, d), latent_logvar.view(-1, d)).sum(dim=1).view(batch_size, -1).unfold(1, 2*T, 1).sum(2)
     
     latent_sample = latent_sample.view(batch_size, seq_len*d).unfold(1, 2*T*d, d) # [20, 493, 24]
     latent_mu = latent_mu.view(batch_size, seq_len*d).unfold(1, 2*T*d, d)
     latent_logvar = latent_logvar.view(batch_size, seq_len*d).unfold(1, 2*T*d, d)
+    
+    log_q_zCx = log_density_gaussian(latent_sample, latent_mu, latent_logvar).sum(dim=2)
     mat_log_qz = matrix_log_density_gaussian(latent_sample, latent_mu, latent_logvar) # 20*493*493*24
     log_qz = torch.logsumexp(mat_log_qz.sum(3), dim=2, keepdim=False) # actually log-mean-exp. only diff by log(1/(seq_len))
    
