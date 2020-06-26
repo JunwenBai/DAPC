@@ -4,29 +4,14 @@ import logging
 
 import torch
 import torch.nn.functional as F
-
-from .solver import LIN, DNN, RNN, ortho_reg_fn
-from transformer.encoder_stoc import Encoder
+from torch.autograd import Variable
+from .solver import LIN, DNN, RNN, TRANSFORMER, ortho_reg_fn, ortho_reg_Y
 from .cov_utils import calc_cov_from_data, calc_pi_from_cov
 from .utils import make_non_pad_mask, pad_list, _context_concat, gen_batch_indices
 from .spec_augment import spectral_masking
-from .vae import btcvae_loss, vdca_loss
+from .vae import btcvae_loss, vdca_loss, vdca_rate_loss
 from distutils.util import strtobool
 import pdb
-
-
-def ortho_reg_Y(Y, src_mask):
-    # Weiran: Y is of shape (B, maxlen, fdim).
-    fdim = Y.size(2)
-    I = torch.eye(fdim, device=Y.device, dtype=Y.dtype)
-
-    Y = torch.reshape(Y, [-1, fdim])
-    mask_float = src_mask.float().view([-1, 1])
-    Y_mean = torch.sum(torch.mul(Y, mask_float), 0, keepdim=True) / torch.sum(mask_float)
-    Y = Y - Y_mean
-
-    cov = torch.mm(torch.mul(Y, mask_float).t(), Y) / torch.sum(mask_float)
-    return torch.sum((cov - I) ** 2), cov
 
 
 class DynamicalComponentsAnalysis(torch.nn.Module):
@@ -70,8 +55,6 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         # Weiran: death rates for stochastic layers.
         group.add_argument('--edeath-rate', default=0.0, type=float,
                            help='death rate for encoder')
-        group.add_argument('--ddeath-rate', default=0.0, type=float,
-                           help='death rate for decoder')
         # Encoder
         group.add_argument('--dropout-rate', default=0.0, type=float,
                            help='Dropout rate for the encoder')
@@ -86,19 +69,19 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                            help='Number of heads for multi head attention')
 
         # VAE-related
-        group.add_argument('--alpha', default=0., type=float,
+        group.add_argument('--vae_alpha', default=0., type=float,
                            help='alpha')
-        group.add_argument('--beta', default=0., type=float,
+        group.add_argument('--vae_beta', default=0., type=float,
                            help='beta')
-        group.add_argument('--gamma', default=1., type=float,
+        group.add_argument('--vae_gamma', default=1., type=float,
                            help='gamma')
-        group.add_argument('--zeta', default=1., type=float,
+        group.add_argument('--vae_zeta', default=1., type=float,
                            help='zeta')
 
         # CPC-related.
-        group.add_argument('--num_pos', default=4, type=int,
+        group.add_argument('--cpc_num_pos', default=4, type=int,
                            help='Number of positive samples for CPC')
-        group.add_argument('--num_neg', default=16, type=int,
+        group.add_argument('--cpc_num_neg', default=16, type=int,
                            help='Number of negative samples for CPC')
 
         # Specaugment-related.
@@ -154,6 +137,8 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         self.dtype = dtype
         self.block_toeplitz = args.block_toeplitz
         self.cov_diag_reg = args.cov_diag_reg
+
+        '''
         cholesky = torch.tril((torch.rand(2*T*fdim, 2*T*fdim)*2-1.)*math.sqrt(0.1/(2.*T*fdim)))+torch.eye(2*T*fdim)
         #cholesky = torch.eye(2*T*fdim)
         #cholesky = torch.tril(torch.ones(2*T*fdim, 2*T*fdim))
@@ -162,6 +147,8 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         #self.chol = torch.matmul(cholesky, cholesky.t()).to(device).clone().detach().requires_grad_(True)
         #self.mu = torch.load("pts/hs_mean.pt").to(device).clone().detach().requires_grad_(True)
         self.mu = torch.zeros(2*T*fdim).to(device).clone().detach().requires_grad_(True)
+        '''
+
         '''self.chol = torch.nn.Parameter(cholesky)
         self.chol.requires_grad = True
         self.mu = torch.nn.Parameter(torch.zeros(2*T*fdim))
@@ -183,44 +170,55 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
 
         # VAE params
         self.use_vae = use_vae
-        self.alpha = args.alpha
-        self.beta = args.beta
-        self.gamma = args.gamma
-        self.zeta = args.zeta
-        print("coeffs:", self.alpha, self.beta, self.gamma, self.zeta)
+        self.vae_alpha = args.vae_alpha
+        self.vae_beta = args.vae_beta
+        self.vae_gamma = args.vae_gamma
+        self.vae_zeta = args.vae_zeta
+        if self.use_vae:
+            print("VAE coeffs:", self.vae_alpha, self.vae_beta, self.vae_gamma, self.vae_zeta)
 
         # CPC params.
         self.use_cpc = use_cpc
-        self.num_pos = args.num_pos
-        self.num_neg = args.num_neg
+        self.cpc_num_pos = args.cpc_num_pos
+        self.cpc_num_neg = args.cpc_num_neg
+
+        if use_vae:
+            # In case of VAE, we need both mean and variance.
+            self.encoder_odim = self.fdim * 2
+        else:
+            self.encoder_odim = self.fdim
 
         if self.encoder_type == "lin":
-            assert (not self.use_vae), "linear model cannot use VAE structure"
-            self.encoder = LIN(self.idim, self.fdim, dropout=self.dropout)
+            self.encoder = LIN(self.idim, self.encoder_odim, dropout=self.dropout)
+        elif self.encoder_type == "dnn":
+            self.encoder = DNN(self.idim, self.encoder_odim,
+                    h_sizes=[args.encoder_dnn_hidden_size] * args.encoder_dnn_num_layers, dropout=self.dropout)
+        elif self.encoder_type == "transformer":
+            self.encoder = TRANSFORMER(
+                idim=idim * (1+2*self.input_context),
+                odim=self.encoder_odim,
+                adim=args.adim,
+                aheads=args.aheads,
+                eunits=args.eunits,
+                elayers=args.elayers,
+                input_layer=args.transformer_input_layer,
+                dropout_rate=self.dropout,
+                death_rate=args.edeath_rate)
         else:
-            if self.encoder_type == "transformer":
-                self.encoder = Encoder(
-                    idim=idim * (1+2*self.input_context),
-                    attention_dim=args.adim,
-                    attention_heads=args.aheads,
-                    linear_units=args.eunits,
-                    num_blocks=args.elayers,
-                    input_layer=args.transformer_input_layer,
-                    dropout_rate=self.dropout,  # args.dropout_rate,
-                    death_rate=args.edeath_rate,
-                )
-                self.proj = LIN(args.adim, self.fdim if not self.use_vae else self.fdim*2, dropout=self.dropout)
-            else:
-                if self.encoder_type == "dnn":
-                    self.encoder = DNN(self.idim, self.fdim,
-                            h_sizes=[args.encoder_dnn_hidden_size] * args.encoder_dnn_num_layers, dropout=self.dropout, use_vae=self.use_vae)
-                else:
-                    # Choices are ['lstm', 'gru', 'blstm', 'bgru'].
-                    self.encoder = RNN(idim=self.idim, elayers=args.encoder_rnn_num_layers, cdim=args.encoder_rnn_hidden_size,
-                            hdim=self.fdim, dropout=self.dropout, typ=self.encoder_type, use_vae=self.use_vae)
+            # Choices are ['lstm', 'gru', 'blstm', 'bgru'].
+            self.encoder = RNN(idim=self.idim, elayers=args.encoder_rnn_num_layers, cdim=args.encoder_rnn_hidden_size,
+                    hdim=self.encoder_odim, dropout=self.dropout, typ=self.encoder_type)
 
         if self.use_cpc:
             self.cpc_future_enc = LIN(self.idim, self.fdim, dropout=self.dropout)
+        else:
+            self.cpc_future_enc = None
+
+        if self.use_vae:
+            # Weiran: the prior has zero mean and covariance L*L' (to ensure PSD).
+            self.vae_prior_L = Variable(torch.eye(2 * self.fdim * self.T).type(self.dtype), requires_grad=True)
+        else:
+            self.vae_prior_L = None
 
         # Weiran: based on my experience, reconstruction network would better be a DNN than RNNs.
         if self.recon_lambda > 0:
@@ -228,38 +226,34 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         else:
             self.decoder = None
 
-    def vae_latent(self, hs_pad):
-        latent_dim = hs_pad.shape[-1]
-        half_dim = latent_dim//2
-        mu = hs_pad[:, :, :half_dim].contiguous()
-        logvar = hs_pad[:, :, half_dim:].contiguous()
+
+    def vae_split(self, hs_pad, split_size):
+
+        logvar = hs_pad[:, :, split_size:].contiguous()
+        mu = hs_pad[:, :, :split_size].contiguous()
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         samples = mu + eps * std
 
-        #kld = - 0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-        #latent_loss = btcvae_loss((mu, logvar), samples, n_data=self.n_data, is_mss=False, alpha=1., beta=20.)
-        latent_loss = vdca_loss((mu, logvar), samples, self.mu, self.chol, self.T, n_data=self.n_data, alpha=self.alpha, beta=self.beta, gamma=self.gamma, zeta=self.zeta)
+        return mu, logvar, samples
 
-        return latent_loss, mu, samples
 
     def cpc_latent(self, xs_pad, hs_pad, hmask, ilens):
-        self.cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.cov_diag_reg)
-        pi = calc_pi_from_cov(self.cov)
 
-        slfidx, posidx, negidx = gen_batch_indices(ilens, max(ilens), range(self.num_pos), self.num_neg, portion=1.0)
+        slfidx, posidx, negidx = gen_batch_indices(ilens, max(ilens), range(self.cpc_num_pos), self.cpc_num_neg, portion=1.0)
         fx = hs_pad.view(-1, hs_pad.shape[-1])
         gy = self.cpc_future_enc(xs_pad.view(-1, xs_pad.shape[-1]))
         fx_slf = fx[slfidx]
         gy_pos = gy[posidx]
         pos_score = torch.sum(fx_slf * gy_pos, 1, keepdim=True)
-        fx_slf = fx_slf.repeat(1, self.num_neg).view(-1, self.fdim)
+        fx_slf = fx_slf.repeat(1, self.cpc_num_neg).view(-1, self.fdim)
         gy_neg = gy[negidx]
-        neg_score = torch.sum(fx_slf * gy_neg, 1).view(-1, self.num_neg)
+        neg_score = torch.sum(fx_slf * gy_neg, 1).view(-1, self.cpc_num_neg)
         scores = torch.cat([pos_score, neg_score], 1)
         log_preds = F.log_softmax(scores)
-        key_loss = - torch.mean(log_preds[:, 0])
-        return pi, key_loss
+        cpc_loss = - torch.mean(log_preds[:, 0])
+        return cpc_loss
+
 
     def forward(self, xs_pad, ilens, masks_in=None, masks_out=None):
         """ forward.
@@ -274,24 +268,14 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         :rtype: float
         """
 
-        # Weiran: for now, both DNN and RNNs do not reduce the lengths.
-        if not self.encoder_type == "transformer":
-            hs_pad, olens, _ = self.encoder(xs_pad, ilens)
-            olens_list = olens.tolist()
-            hmask = make_non_pad_mask(olens_list).to(xs_pad.device)
-        else:
-            src_mask = make_non_pad_mask(ilens.tolist()).to(xs_pad.device).unsqueeze(-2)
-            hs_pad, hmask = self.encoder(xs_pad, src_mask)
-            hs_pad = self.proj(hs_pad, None)
-            hmask = hmask[:, 0, :]
+        # Weiran: for now, both RNN and TRANSFORMER do not reduce the input lengths.
+        hs_pad, olens, _ = self.encoder(xs_pad, ilens)
+        hmask = make_non_pad_mask(olens.tolist()).to(xs_pad.device)
 
-        # Compute cov matrix.
-        ortho_loss, self.cov_frame = ortho_reg_Y(hs_pad, hmask) if not self.use_vae else ortho_reg_Y(hs_pad[:, :, :hs_pad.shape[-1]//2], hmask)
-        if self.encoder_type == "lin":
-            ortho_loss = ortho_reg_fn(self.encoder.fc1.weight.t())
-        elif self.use_vae:
-            latent_loss, hs_pad_mu, hs_pad = self.vae_latent(hs_pad)
-            ortho_loss = latent_loss
+        # Let us change the ortho_loss into latent loss, as they are loss in the feature space.
+        if self.use_vae:
+            # Samples are then used for reconstruction.
+            mu, logvar, hs_pad = self.vae_split(hs_pad, self.fdim)
 
         if self.decoder:
             if not self.masked_recon:
@@ -305,13 +289,10 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             else:
                 # Masked reconstruction.
                 assert (masks_in is not None) and (masks_out is not None), "masked reconstruction requires nonzero in/out masks"
-                if not self.encoder_type == "transformer":
-                    hs_pad1, _, _ = self.encoder(xs_pad * masks_in, ilens)
-                else:
-                    hs_pad1, _ = self.encoder(xs_pad * masks_in, src_mask)
-                    hs_pad1 = self.proj(hs_pad1, None)
+                hs_pad1, _ = self.encoder(xs_pad * masks_in, ilens)
                 if self.use_vae:
-                    _, _, hs_pad1 = self.vae_latent(hs_pad1)
+                    # Samples are now used for reconstruction.
+                    _, _, hs_pad1 = self.vae_split(hs_pad1, self.fdim)
                 recon_loss = torch.sum(((self.decoder(hs_pad1) - xs_pad) ** 2) * masks_out) / torch.sum(masks_out)
         else:
             recon_loss = 0.0
@@ -319,28 +300,39 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         #if self.use_vae:
         #    hs_pad = hs_pad_mu
 
-        if self.use_cpc:
-            pi, key_loss = self.cpc_latent(xs_pad, hs_pad, hmask, ilens)
-        elif self.use_vae:
-            '''B, maxlen, d = hs_pad.shape
-            self.hs_mean = hs_pad.view([B, maxlen*d]).unfold(1, 2*self.T*d, d).mean(0).mean(0)
+        # Weiran: always compute per-frame cov matrix and monitor the ortho_loss.
+        ortho_loss, self.cov_frame = ortho_reg_Y(hs_pad, hmask)
+        if self.encoder_type == "lin" and not self.use_vae:
+            # This is a special setting that mimics the original DCA.
+            ortho_loss = ortho_reg_fn(self.encoder.fc1.weight.t())
 
-            self.cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.cov_diag_reg)
-            pi = calc_pi_from_cov(self.cov)'''
-            self.hs_mean = self.mu
-            self.cov = torch.matmul(self.chol, self.chol.t())
-            #self.cov = self.chol
-            pi = calc_pi_from_cov(self.cov)
-            key_loss = -pi
+        # Weiran: always compute the 2T-time cov matrix and monitor the pi.
+        if self.use_vae:
+            self.cov = torch.mm(self.vae_prior_L, self.vae_prior_L.t()) + self.cov_diag_reg * torch.eye(2 * self.T * self.fdim)
         else:
-            B, maxlen, d = hs_pad.shape
-            self.hs_mean = hs_pad.view([B, maxlen*d]).unfold(1, 2*self.T*d, d).mean(0).mean(0)
             self.cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.cov_diag_reg)
-            pi = calc_pi_from_cov(self.cov)
-            key_loss = - pi
+        pi = calc_pi_from_cov(self.cov)
 
-        self.loss = key_loss + self.ortho_lambda * ortho_loss + self.recon_lambda * recon_loss
-        return self.loss, float(pi), float(ortho_loss), float(recon_loss), (self.cov_frame).detach().cpu().numpy()
+        # Compile the total loss.
+        if self.use_cpc:
+            # Since pi and ortho_loss do not make sense for CPC.
+            key_loss = self.cpc_latent(xs_pad, hs_pad, hmask, ilens)
+        elif self.use_vae:
+            '''
+            # kld = - 0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+            # latent_loss = btcvae_loss((mu, logvar), samples, n_data=self.n_data, is_mss=False, alpha=1., beta=20.)
+            latent_loss = vdca_loss((mu, logvar), hs_pad, hmask, self.mu, self.vae_prior_L, self.T, n_data=self.n_data,
+                                    alpha=self.vae_alpha, beta=self.vae_beta, gamma=self.vae_gamma, zeta=self.vae_zeta)
+            '''
+            rate_loss = vdca_rate_loss((mu, logvar), hs_pad, hmask, self.T, self.cov)
+            # Weiran: according "Fixing a broken ELBO" and beta-VAE, the beta is ratio between rate and log-likelihood.
+            key_loss = -pi + self.vae_beta * self.recon_lambda * rate_loss
+        else:
+            # For deterministic method, we use pi and ortho_loss.
+            key_loss = -pi + self.ortho_lambda * ortho_loss
+
+        self.loss = key_loss + self.recon_lambda * recon_loss
+        return self.loss, float(pi), float(ortho_loss), float(recon_loss), (self.cov_frame).detach().cpu().numpy(), (self.cov).detach().cpu().numpy()
 
 
     def encode(self, x):
@@ -348,13 +340,9 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         # x is a 2D tensor of shape time x idim.
         self.eval()
         ilens = torch.tensor([x.size(0)], device=x.device).long()
-        if not self.encoder_type == "transformer":
-            hs_pad, _, _ = self.encoder(x.unsqueeze(0), ilens)
-        else:
-            enc_output, _ = self.encoder(x.unsqueeze(0), None)
-            hs_pad = self.proj(enc_output, None)
+        hs_pad, _ = self.encoder(x.unsqueeze(0), ilens)
         if self.use_vae:
-            _, hs_pad, _ = self.vae_latent(hs_pad)
+            hs_pad, _, _ = self.vae_split(hs_pad, self.fdim)
         return hs_pad.squeeze(0).detach()
 
 

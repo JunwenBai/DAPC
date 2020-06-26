@@ -3,8 +3,47 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.nn.utils.rnn import pad_packed_sequence
+from .utils import make_non_pad_mask
+from transformer.encoder_stoc import Encoder
+
 import math
 import logging
+
+
+def ortho_reg_Y(Y, src_mask):
+    # Weiran: Y is of shape (B, maxlen, fdim).
+    fdim = Y.size(2)
+    I = torch.eye(fdim, device=Y.device, dtype=Y.dtype)
+
+    Y = torch.reshape(Y, [-1, fdim])
+    mask_float = src_mask.float().view([-1, 1])
+    Y_mean = torch.sum(torch.mul(Y, mask_float), 0, keepdim=True) / torch.sum(mask_float)
+    Y = Y - Y_mean
+
+    cov = torch.mm(torch.mul(Y, mask_float).t(), Y) / torch.sum(mask_float)
+    return torch.sum((cov - I) ** 2), cov
+
+
+def ortho_reg_fn(V, ortho_lambda=1.):
+    """Regularization term which encourages the basis vectors in the
+    columns of V to be orthonormal.
+    Parameters
+    ----------
+    V : shape (hidden, fdim)
+        Projection layer.
+    ortho_lambda : float
+        Regularization hyperparameter.
+    Returns
+    -------
+    reg_val : float
+        Value of regularization function.
+    """
+
+    fdim = V.shape[1]
+    reg_val = ortho_lambda * torch.sum((torch.mm(V.t(), V) - torch.eye(fdim, device=V.device, dtype=V.dtype)) ** 2)
+
+    return reg_val
+
 
 class KERNEL(nn.Module):
 
@@ -32,28 +71,6 @@ class KERNEL(nn.Module):
         return torch.cat([self.list[i](aff[:,i,:]) for i in range(self.S)], 1)
 
 
-# Weiran: moved this function here for now.
-def ortho_reg_fn(V, ortho_lambda=1.):
-    """Regularization term which encourages the basis vectors in the
-    columns of V to be orthonormal.
-    Parameters
-    ----------
-    V : shape (hidden, fdim)
-        Projection layer.
-    ortho_lambda : float
-        Regularization hyperparameter.
-    Returns
-    -------
-    reg_val : float
-        Value of regularization function.
-    """
-
-    fdim = V.shape[1]
-    reg_val = ortho_lambda * torch.sum((torch.mm(V.t(), V) - torch.eye(fdim, device=V.device, dtype=V.dtype)) ** 2)
-
-    return reg_val
-
-
 class LIN(nn.Module):
 
     def __init__(self, n_input, n_output, dropout=0.0):
@@ -67,12 +84,12 @@ class LIN(nn.Module):
         if ilens is None:
             return x
         else:
-            return x, ilens, None
+            return x, ilens
 
 
 class DNN(nn.Module):
     
-    def __init__(self, n_input, n_output, dropout=0.0, h_sizes=[128, 128], reset_param=False, use_vae=False):
+    def __init__(self, n_input, n_output, dropout=0.0, h_sizes=[128, 128], reset_param=False):
         super(DNN, self).__init__()
         self.dropout = nn.Dropout(dropout)
         self.fc_in = nn.Linear(n_input, h_sizes[0])
@@ -80,17 +97,15 @@ class DNN(nn.Module):
         self.n_layers = len(h_sizes)
         for i in range(1, self.n_layers):
             self.hidden.append(nn.Linear(h_sizes[i-1], h_sizes[i]))
-        self.fc_out = nn.Linear(h_sizes[-1], n_output if not use_vae else n_output*2)
+        self.fc_out = nn.Linear(h_sizes[-1], n_output)
         if reset_param:
             self.reset_parameters()
         
-    def reset_parameters(self):
+    def reset_parameters(self, std=0.2):
         for layer in self.hidden:
-            # stdv = 3 / math.sqrt(layer.weight.size(1))
-            stdv = 0.2
-            layer.weight.data.normal_(stdv)
+            layer.weight.data.normal_(std)
             if layer.bias is not None:
-                layer.bias.data.normal_(stdv)    
+                layer.bias.data.normal_(std)
 
     def forward(self, x, ilens=None):
         for fc in self.hidden:
@@ -99,7 +114,7 @@ class DNN(nn.Module):
         if ilens is None:
             return x
         else:
-            return x, ilens, None
+            return x, ilens
 
 
 class RNN(torch.nn.Module):
@@ -112,7 +127,7 @@ class RNN(torch.nn.Module):
     :param str typ: The RNN type
     """
 
-    def __init__(self, idim, elayers, cdim, hdim, dropout, typ="blstm", use_vae=False):
+    def __init__(self, idim, elayers, cdim, hdim, dropout, typ="blstm"):
         super(RNN, self).__init__()
         bidir = typ[0] == "b"
         self.nbrnn = torch.nn.LSTM(idim, cdim, elayers, batch_first=True,
@@ -120,9 +135,9 @@ class RNN(torch.nn.Module):
             else torch.nn.GRU(idim, cdim, elayers, batch_first=True, dropout=dropout,
                               bidirectional=bidir)
         if bidir:
-            self.l_last = torch.nn.Linear(cdim * 2, hdim if not use_vae else hdim*2)
+            self.l_last = torch.nn.Linear(cdim * 2, hdim)
         else:
-            self.l_last = torch.nn.Linear(cdim, hdim if not use_vae else hdim*2)
+            self.l_last = torch.nn.Linear(cdim, hdim)
         self.typ = typ
 
     def forward(self, xs_pad, ilens, prev_state=None):
@@ -147,7 +162,9 @@ class RNN(torch.nn.Module):
         projected = torch.tanh(self.l_last(
             ys_pad.contiguous().view(-1, ys_pad.size(2))))
         xs_pad = projected.view(ys_pad.size(0), ys_pad.size(1), -1)
-        return xs_pad, ilens, states  # x: utt list of frame x dim
+        return xs_pad, ilens
+        # Weiran: not returning states.
+        # return xs_pad, ilens, states  # x: utt list of frame x dim
 
 
 def reset_backward_rnn_state(states):
@@ -158,3 +175,30 @@ def reset_backward_rnn_state(states):
     else:
         states[1::2] = 0.
     return states
+
+
+class TRANSFORMER(nn.Module):
+
+    def __init__(self, idim, odim, adim, aheads, eunits, elayers, input_layer, dropout, death_rate=0.0):
+        super(TRANSFORMER, self).__init__()
+        self.encoder = TRANSFORMER(
+            idim=idim,
+            attention_dim=adim,
+            attention_heads=aheads,
+            linear_units=eunits,
+            num_blocks=elayers,
+            input_layer=input_layer,
+            dropout_rate=dropout,
+            death_rate=death_rate,
+        )
+        self.dropout = nn.Dropout(dropout)
+        self.proj = nn.Linear(adim, odim)
+
+    def forward(self, xs_pad, ilens):
+        src_mask = make_non_pad_mask(ilens.tolist()).to(xs_pad.device).unsqueeze(-2)
+        hs_pad, hmask = self.encoder(xs_pad, src_mask)
+        hs_pad = self.proj(self.dropout(hs_pad))
+        hmask = hmask[:, 0, :]
+        olens = torch.sum(hmask, 1)
+
+        return hs_pad, olens

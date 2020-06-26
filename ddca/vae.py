@@ -6,7 +6,29 @@ from torch import optim
 from torch.distributions.multivariate_normal import MultivariateNormal as MVN
 from .math import log_density_gaussian, log_importance_weight_matrix, matrix_log_density_gaussian
 
-def vdca_loss(latent_dist, latent_sample, mu, chol, T, n_data, alpha=0., beta=0., gamma=1., zeta=1.):
+def vdca_rate_loss(latent_dist, latent_sample, hmask, T, cov):
+    latent_mu, latent_logvar = latent_dist
+    batch_size, seq_len, d = latent_sample.shape
+    # hmask is of shape (batch_size, seq_len)
+
+    # calculate log q(z|x)
+    latent_sample = latent_sample.view(batch_size, seq_len*d).unfold(1, 2 * T * d, d)  # [20, 493, 24]
+    latent_mu = latent_mu.view(batch_size, seq_len*d).unfold(1, 2 * T * d, d)
+    latent_logvar = latent_logvar.view(batch_size, seq_len*d).unfold(1, 2 * T * d, d)
+    hmask_unfold = hmask.float().unfold(1, 2 * T, 1).view(-1)
+    log_q_zCx = log_density_gaussian(latent_sample.view(-1, d), latent_mu.view(-1, d), latent_logvar.view(-1, d))
+
+    # calculate log p(z)
+    mvn = MVN(torch.zeros(2 * T * d, device=cov.device), covariance_matrix=cov)
+    log_pz = mvn.log_prob(latent_sample)
+
+    # Here I am using a naive implementation of KL.
+    rates = torch.exp(log_q_zCx) * (log_q_zCx - log_pz)
+    return torch.sum(rates * hmask_unfold) / torch.sum(hmask_unfold)
+
+
+
+def vdca_loss_junwen(latent_dist, latent_sample, mu, chol, T, n_data, alpha=0., beta=0., gamma=1., zeta=1.):
     batch_size, seq_len, d = latent_sample.shape
     latent_mu, latent_logvar = latent_dist
 
