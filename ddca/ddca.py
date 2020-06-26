@@ -9,7 +9,7 @@ from .solver import LIN, DNN, RNN, TRANSFORMER, ortho_reg_fn, ortho_reg_Y
 from .cov_utils import calc_cov_from_data, calc_pi_from_cov
 from .utils import make_non_pad_mask, pad_list, _context_concat, gen_batch_indices
 from .spec_augment import spectral_masking
-from .vae import btcvae_loss, vdca_loss, vdca_rate_loss
+from .vae import btcvae_loss, vdca_rate_loss
 from distutils.util import strtobool
 import pdb
 
@@ -71,11 +71,11 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         # VAE-related
         group.add_argument('--vae_alpha', default=0., type=float,
                            help='alpha')
-        group.add_argument('--vae_beta', default=0., type=float,
+        group.add_argument('--vae_beta', default=1., type=float,
                            help='beta')
-        group.add_argument('--vae_gamma', default=1., type=float,
+        group.add_argument('--vae_gamma', default=0., type=float,
                            help='gamma')
-        group.add_argument('--vae_zeta', default=1., type=float,
+        group.add_argument('--vae_zeta', default=0., type=float,
                            help='zeta')
 
         # CPC-related.
@@ -214,11 +214,8 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         else:
             self.cpc_future_enc = None
 
-        if self.use_vae:
-            # Weiran: the prior has zero mean and covariance L*L' (to ensure PSD).
-            self.vae_prior_L = Variable(torch.eye(2 * self.fdim * self.T).type(self.dtype), requires_grad=True)
-        else:
-            self.vae_prior_L = None
+        # Weiran: the prior has zero mean and covariance L*L' (to ensure PSD).
+        self.vae_prior_L = Variable(torch.eye(2 * self.fdim * self.T).type(self.dtype).to(device), requires_grad=True)
 
         # Weiran: based on my experience, reconstruction network would better be a DNN than RNNs.
         if self.recon_lambda > 0:
@@ -269,7 +266,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         """
 
         # Weiran: for now, both RNN and TRANSFORMER do not reduce the input lengths.
-        hs_pad, olens, _ = self.encoder(xs_pad, ilens)
+        hs_pad, olens = self.encoder(xs_pad, ilens)
         hmask = make_non_pad_mask(olens.tolist()).to(xs_pad.device)
 
         # Let us change the ortho_loss into latent loss, as they are loss in the feature space.
@@ -308,7 +305,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
 
         # Weiran: always compute the 2T-time cov matrix and monitor the pi.
         if self.use_vae:
-            self.cov = torch.mm(self.vae_prior_L, self.vae_prior_L.t()) + self.cov_diag_reg * torch.eye(2 * self.T * self.fdim)
+            self.cov = torch.mm(self.vae_prior_L, self.vae_prior_L.t()) + self.cov_diag_reg * torch.eye(2 * self.T * self.fdim).to(self.device)
         else:
             self.cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.cov_diag_reg)
         pi = calc_pi_from_cov(self.cov)
@@ -325,6 +322,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                                     alpha=self.vae_alpha, beta=self.vae_beta, gamma=self.vae_gamma, zeta=self.vae_zeta)
             '''
             rate_loss = vdca_rate_loss((mu, logvar), hs_pad, hmask, self.T, self.cov)
+            ortho_loss = rate_loss
             # Weiran: according "Fixing a broken ELBO" and beta-VAE, the beta is ratio between rate and log-likelihood.
             key_loss = -pi + self.vae_beta * self.recon_lambda * rate_loss
         else:
@@ -352,7 +350,7 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, b
         model = model.to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    optim_prior = torch.optim.Adam([model.chol, model.mu], lr=1e-3)
+    optim_prior = torch.optim.Adam([model.vae_prior_L], lr=1e-3)
     input_context = model.input_context
 
     # X_train is a sequence of input sequences, whose lengths are saved in L_train.
@@ -389,9 +387,9 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, b
                 masks_out = [_context_concat(m, input_context) for m in masks_out]
                 masks_in = pad_list([torch.from_numpy(x).float() for x in masks_in], 0).to(device)
                 masks_out = pad_list([torch.from_numpy(x).float() for x in masks_out], 0).to(device)
-                loss, pi, loss_orth, loss_recon, cov_frame = model(x_batch, l_batch, masks_in, masks_out)
+                loss, pi, loss_orth, loss_recon, cov_frame, cov = model(x_batch, l_batch, masks_in, masks_out)
             else:
-                loss, pi, loss_orth, loss_recon, cov_frame = model(x_batch, l_batch)
+                loss, pi, loss_orth, loss_recon, cov_frame, cov = model(x_batch, l_batch)
 
             # loss, pi, loss_orth, loss_recon, _ = model(x_batch, l_batch)
             #print("minibatch %03d/%03d: pi=%f" % (i, n_batch_train, pi))
@@ -407,7 +405,7 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, b
             total_ortho_loss += loss_orth
             total_loss_recon += loss_recon * total_len_batch
 
-        print(torch.matmul(model.chol, model.chol.t())[:6, :6])
+        #print(torch.matmul(model.chol, model.chol.t())[:6, :6])
         #print(model.chol[:6, :6])
 
         avg_loss_train = total_loss / n_batch_train
@@ -423,6 +421,8 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, b
         total_ortho_loss = 0.0
         total_loss_recon = 0.0
         total_cov_frame = np.zeros([model.fdim, model.fdim])
+        total_cov = np.zeros([2*model.fdim*model.T, 2*model.fdim*model.T])
+
         for i in range(int(math.ceil(n_valid / batch_size))):
             x_batch_list = [torch.from_numpy(_context_concat(X_valid[_],input_context)).float() for _ in range(i*batch_size, min((i+1)*batch_size, n_valid))]
             l_batch_list = [L_valid[_] for _ in range(i*batch_size, min((i+1)*batch_size, n_valid))]
@@ -438,9 +438,9 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, b
                 masks_out = [_context_concat(m, input_context) for m in masks_out]
                 masks_in = pad_list([torch.from_numpy(x).float() for x in masks_in], 0).to(device)
                 masks_out = pad_list([torch.from_numpy(x).float() for x in masks_out], 0).to(device)
-                loss, pi, loss_orth, loss_recon, cov_frame = model(x_batch, l_batch, masks_in, masks_out)
+                loss, pi, loss_orth, loss_recon, cov_frame, cov = model(x_batch, l_batch, masks_in, masks_out)
             else:
-                loss, pi, loss_orth, loss_recon, cov_frame = model(x_batch, l_batch)
+                loss, pi, loss_orth, loss_recon, cov_frame, cov = model(x_batch, l_batch)
             #print("minibatch %03d/%03d: pi=%f" % (i, n_batch_valid, pi))
 
             total_loss += loss.detach()
@@ -448,12 +448,14 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, b
             total_ortho_loss += loss_orth
             total_loss_recon += loss_recon * total_len_batch
             total_cov_frame += cov_frame * total_len_batch
+            total_cov += cov * total_len_batch
 
         avg_loss_valid = total_loss / n_batch_valid
         avg_pi_valid = total_pi / n_batch_valid
         avg_ortho_loss_valid = total_ortho_loss / n_batch_valid
         avg_recon_loss_valid = total_loss_recon / sum(L_valid)
         avg_cov_frame = total_cov_frame / sum(L_valid)
+        avg_cov = total_cov / sum(L_valid)
         print("epoch %d, valid avg loss=%f, pi=%f, ortho_loss=%f, recon_loss=%f" %
               (epoch, avg_loss_valid, avg_pi_valid, avg_ortho_loss_valid, avg_recon_loss_valid))
         print(avg_cov_frame)
