@@ -11,8 +11,8 @@ def torch_toeplitzify(cov, T, d, symmetrize=True):
         for i in range(T - delta_t):
             to_avg_lower[i] = cov[(delta_t + i) * d:(delta_t + i + 1) * d, i * d:(i + 1) * d]
             to_avg_upper[i] = cov[i * d:(i + 1) * d, (delta_t + i) * d:(delta_t + i + 1) * d]
-        avg_lower = torch.mean(to_avg_lower, axis=0, device=cov.device)
-        avg_upper = torch.mean(to_avg_upper, axis=0, device=cov.device)
+        avg_lower = torch.mean(to_avg_lower, axis=0)
+        avg_upper = torch.mean(to_avg_upper, axis=0)
         if symmetrize:
             avg_lower = 0.5 * (avg_lower + avg_upper.T)
             avg_upper = avg_lower.T
@@ -20,6 +20,49 @@ def torch_toeplitzify(cov, T, d, symmetrize=True):
             cov_toep[(delta_t + i) * d:(delta_t + i + 1) * d, i * d:(i + 1) * d] = avg_lower
             cov_toep[i * d:(i + 1) * d, (delta_t + i) * d:(delta_t + i + 1) * d] = avg_upper
     return cov_toep
+
+
+"""
+
+# Weiran: I tested that the two functions are equivalent, with following tests.
+
+import torch
+from ddca.cov_utils import torch_toeplitzify, matrix_toeplitzify
+cov=torch.FloatTensor(10, 10).uniform_(0, 1)
+
+a=torch_toeplitzify(cov, 10, 1)
+b=matrix_toeplitzify(cov, 10, 1)
+torch.sum(a-b)
+
+c=torch_toeplitzify(cov, 5, 2)
+d=matrix_toeplitzify(cov, 5, 2)
+torch.sum(c-d)
+
+e=torch_toeplitzify(cov, 2, 5)
+f=matrix_toeplitzify(cov, 2, 5)
+torch.sum(e-f)
+
+"""
+
+def matrix_toeplitzify(cov, T, d):
+    # pdb.set_trace()
+    # First make sure it is symmetric.
+    cov = (cov + cov.t()) / 2.0
+
+    cov = cov.reshape(T, d, T, d).permute(1, 3, 0, 2).reshape(d*d, T*T)
+    cov = torch.cat([cov, torch.zeros([d*d, T], dtype=cov.dtype, device=cov.device)], 1)
+
+    indicator = torch.ones([T+1, T]).triu().reshape(1,(T+1)*T).repeat(d*d, 1)
+    cov_unfold = cov.unfold(1, T+1, T+1)
+    ind_unfold = indicator.unfold(1, T+1, T+1)
+    avg = torch.sum(cov_unfold[:, :, :-1] * ind_unfold[:, :, :-1], 1, keepdim=True) / torch.sum(ind_unfold[:, :, :-1], 1, keepdim=True)
+    avg = torch.cat([avg, torch.zeros([d*d, 1, 1], dtype=avg.dtype, device=avg.device)], 2) * ind_unfold
+    avg = torch.reshape(avg.reshape(d*d, (T+1)*T)[:, :(T*T)], [d*d, T, T])
+
+    indicator = torch.ones([T, T], dtype=avg.dtype, device=avg.device).triu().unsqueeze(0)
+    result = (avg + avg.transpose(1, 2)) / (indicator + indicator.transpose(1, 2))
+    result = result.reshape(d, d, T, T).permute(2, 0, 3, 1).reshape(T*d, T*d)
+    return result
 
 
 def rectify_spectrum(cov, epsilon=1e-6, verbose=False):

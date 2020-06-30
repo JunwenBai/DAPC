@@ -141,7 +141,7 @@ def main(args):
                                                     dropout=0.0, use_cpc=False, masked_recon=False,
                                                     args=args)
         dca_model = fit_ddca(dca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, use_gpu,
-                              batch_size=args.batchsize, max_epochs=50, device=device)
+                              batch_size=args.batchsize, max_epochs=1, device=device)
 
         X_dca = dca_model.encode(
             torch.from_numpy(_context_concat(X_noisy_val[:500], dca_model.input_context)).float().to(device,

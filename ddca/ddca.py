@@ -324,7 +324,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             '''
             rate_loss = vdca_rate_loss((mu, logvar), hs_pad, hmask, self.T, self.cov)
             # Weiran: according "Fixing a broken ELBO" and beta-VAE, the beta is ratio between rate and log-likelihood.
-            key_loss = -pi + self.vae_beta * self.recon_lambda * rate_loss
+            key_loss = -pi + self.vae_beta * rate_loss + self.ortho_lambda * ortho_loss
         else:
             # For deterministic method, we use pi and ortho_loss.
             key_loss = -pi + self.ortho_lambda * ortho_loss
