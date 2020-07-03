@@ -14,6 +14,7 @@ def ortho_reg_Y(Y, src_mask):
     # Weiran: Y is of shape (B, maxlen, fdim).
     fdim = Y.size(2)
     I = torch.eye(fdim, device=Y.device, dtype=Y.dtype)
+    ones = torch.ones_like(I)
 
     Y = torch.reshape(Y, [-1, fdim])
     mask_float = src_mask.float().view([-1, 1])
@@ -21,7 +22,7 @@ def ortho_reg_Y(Y, src_mask):
     Y = Y - Y_mean
 
     cov = torch.mm(torch.mul(Y, mask_float).t(), Y) / torch.sum(mask_float)
-    return torch.sum((cov - I) ** 2), cov
+    return torch.sum(((cov - I) ** 2)*(ones - I)), cov
 
 
 def ortho_reg_fn(V, ortho_lambda=1.):
@@ -138,6 +139,7 @@ class RNN(torch.nn.Module):
             self.l_last = torch.nn.Linear(cdim * 2, hdim)
         else:
             self.l_last = torch.nn.Linear(cdim, hdim)
+        #torch.nn.init.constant_(self.l_last.bias.data, -5.)
         self.typ = typ
 
     def forward(self, xs_pad, ilens, prev_state=None):
@@ -159,8 +161,8 @@ class RNN(torch.nn.Module):
         # ys: utt list of frame x cdim x 2 (2: means bidirectional)
         ys_pad, ilens = pad_packed_sequence(ys, batch_first=True)
         # (sum _utt frame_utt) x dim
-        projected = torch.tanh(self.l_last(
-            ys_pad.contiguous().view(-1, ys_pad.size(2))))
+        #projected = torch.tanh(self.l_last(ys_pad.contiguous().view(-1, ys_pad.size(2))))*4.
+        projected = self.l_last(ys_pad.contiguous().view(-1, ys_pad.size(2)))
         xs_pad = projected.view(ys_pad.size(0), ys_pad.size(1), -1)
         return xs_pad, ilens
         # Weiran: not returning states.

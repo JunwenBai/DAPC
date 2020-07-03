@@ -29,14 +29,15 @@ def vdca_rate_loss(latent_dist, latent_sample, hmask, T, cov):
     return torch.sum(rates * hmask_unfold) / torch.sum(hmask_unfold)
 
 
-def vdca_loss_junwen(latent_dist, latent_sample, mu, chol, T, n_data, alpha=0., beta=0., gamma=1., zeta=1.):
+def vdca_loss_junwen(latent_dist, latent_sample, mu, cov, cov_L, T, n_data, alpha=0., beta=0., gamma=1., zeta=1.):
     batch_size, seq_len, d = latent_sample.shape
     latent_mu, latent_logvar = latent_dist
 
     ### Junwen: compute the log prob terms for each 3*3 block
-    log_pz, log_qz, log_prod_qzi, log_q_zCx = _get_log_pz_qz_prodzi_qzCx(latent_sample, latent_dist, n_data, is_mss=False)
-    block_tc_loss = (log_qz - log_prod_qzi).mean()
-    block_mi_loss = (log_q_zCx - log_qz).mean()
+    block_log_pz, block_log_qz, block_log_prod_qzi, block_log_q_zCx = _get_log_pz_qz_prodzi_qzCx(latent_sample, latent_dist, n_data, T=T, is_mss=False)
+    block_tc_loss = (block_log_qz - block_log_prod_qzi).mean()
+    block_mi_loss = (block_log_q_zCx - block_log_qz).mean()
+    block_kl_loss = (block_log_qz - block_log_pz).mean()
     ###
 
     ### Junwen: compute the log prob terms for each 24*24 block
@@ -50,15 +51,21 @@ def vdca_loss_junwen(latent_dist, latent_sample, mu, chol, T, n_data, alpha=0., 
     mat_log_qz = matrix_log_density_gaussian(latent_sample, latent_mu, latent_logvar) # 20*493*493*24
     log_qz = torch.logsumexp(mat_log_qz.sum(3), dim=2, keepdim=False) # actually log-mean-exp. only diff by log(1/(seq_len))
    
-    mvn = MVN(mu, scale_tril=chol)
+    mvn = MVN(torch.zeros(2 * T * d, device=cov.device), covariance_matrix=cov) # scale_tril=cov_L
+    #latent_sample = torch.matmul(latent_sample, cov_L.t())
     log_pz = mvn.log_prob(latent_sample)
 
-    mi_loss = (log_q_zCx - log_qz).mean()
-    prior_loss = (log_qz - log_pz).mean()
+    #mi_loss = (log_q_zCx - log_qz).mean()
+    #prior_loss = (log_qz - log_pz).mean()
+    kl_loss = (log_q_zCx-log_pz).mean()
+
+    #print(post_loss.item(), prior_loss.item())
 
     # the choice of the losses could be arbitrary combination of diff terms for diff-size blocks
     # if gamma=zeta=0, then vdca_loss is the same as btcvae_loss
-    loss = alpha * block_mi_loss + beta * block_tc_loss + gamma * prior_loss + zeta * mi_loss
+    loss = alpha * block_mi_loss + beta * block_tc_loss + gamma * block_kl_loss + zeta * kl_loss
+    # loss = (post_loss + prior_loss) * zeta + block_tc_loss
+    #return -log_pz.mean()
     return loss
 
 def btcvae_loss(latent_dist, latent_sample, n_data, is_mss=True, alpha=1., beta=6.):
@@ -86,7 +93,7 @@ def btcvae_loss(latent_dist, latent_sample, n_data, is_mss=True, alpha=1., beta=
     return loss
 
 
-def _get_log_pz_qz_prodzi_qzCx(latent_sample, latent_dist, n_data, is_mss=True):
+def _get_log_pz_qz_prodzi_qzCx(latent_sample, latent_dist, n_data, T=4, is_mss=True):
     batch_size, seq_len, hidden_dim = latent_sample.shape
 
     # calculate log q(z|x)
@@ -97,7 +104,8 @@ def _get_log_pz_qz_prodzi_qzCx(latent_sample, latent_dist, n_data, is_mss=True):
     zeros = torch.zeros_like(latent_sample)
     log_pz = log_density_gaussian(latent_sample, zeros, zeros).sum(2)
 
-    mat_log_qz = matrix_log_density_gaussian(latent_sample, *latent_dist)
+    mat_log_qz = matrix_log_density_gaussian(latent_sample, *latent_dist) # 20*500*500*3
+    mat_log_qz = mat_log_qz[:, :, 1:, :]
 
     '''if is_mss:
         # use stratification

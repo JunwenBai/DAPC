@@ -6,13 +6,13 @@ import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
 from .solver import LIN, DNN, RNN, TRANSFORMER, ortho_reg_fn, ortho_reg_Y
-from .cov_utils import calc_cov_from_data, calc_pi_from_cov
+from .cov_utils import calc_cov_from_data, calc_pi_from_cov, torch_toeplitzify, calc_cross_cov_mats_from_cov, calc_pi_from_cross_cov_mats, calc_cov_from_cross_cov_mats, matrix_toeplitzify
 from .utils import make_non_pad_mask, pad_list, _context_concat, gen_batch_indices
 from .spec_augment import spectral_masking
-from .vae import btcvae_loss, vdca_rate_loss
+from .vae import btcvae_loss, vdca_rate_loss, vdca_loss_junwen
 from distutils.util import strtobool
 import pdb
-
+from .data_process import match
 
 class DynamicalComponentsAnalysis(torch.nn.Module):
     """Dynamical Components Analysis.
@@ -132,34 +132,18 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         self.T = T
         self.recon_lambda = recon_lambda
         self.ortho_lambda = ortho_lambda
+        self.rate_lambda = args.rate_lambda
         self.dropout = dropout
         self.encoder_type = encoder_type
         self.dtype = dtype
         self.block_toeplitz = args.block_toeplitz
         self.cov_diag_reg = args.cov_diag_reg
-
-        '''
-        cholesky = torch.tril((torch.rand(2*T*fdim, 2*T*fdim)*2-1.)*math.sqrt(0.1/(2.*T*fdim)))+torch.eye(2*T*fdim)
-        #cholesky = torch.eye(2*T*fdim)
-        #cholesky = torch.tril(torch.ones(2*T*fdim, 2*T*fdim))
-        #hs_cov = torch.load("pts/cov.pt")
-        self.chol = cholesky.to(device).clone().detach().requires_grad_(True)
-        #self.chol = torch.matmul(cholesky, cholesky.t()).to(device).clone().detach().requires_grad_(True)
-        #self.mu = torch.load("pts/hs_mean.pt").to(device).clone().detach().requires_grad_(True)
-        self.mu = torch.zeros(2*T*fdim).to(device).clone().detach().requires_grad_(True)
-        '''
-
-        '''self.chol = torch.nn.Parameter(cholesky)
-        self.chol.requires_grad = True
-        self.mu = torch.nn.Parameter(torch.zeros(2*T*fdim))
-        self.mu.requires_grad = True'''
-        '''self.cov_mask = torch.zeros(2*T*fdim, 2*T*fdim).to(device)
+        self.cov_mask = torch.zeros(2*T*fdim, 2*T*fdim).to(device)
         for i in range(2*T*fdim):
             for j in range(2*T*fdim):
                 if abs(i-j) % fdim == 0:
                     self.cov_mask[i, j] = 1.
         self.cov_mask.requires_grad_(False)
-        self.chol = (torch.matmul(cholesky, cholesky.t()).to(device)+self.cov_mask).clone().detach().requires_grad_(True)'''
 
         # Masked reconstruction params.
         self.masked_recon = masked_recon
@@ -174,6 +158,8 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         self.vae_beta = args.vae_beta
         self.vae_gamma = args.vae_gamma
         self.vae_zeta = args.vae_zeta
+        self.use_prior_pi = args.use_prior_pi
+        self.use_dim_pi = args.use_dim_pi
         if self.use_vae:
             print("VAE coeffs:", self.vae_alpha, self.vae_beta, self.vae_gamma, self.vae_zeta)
 
@@ -216,6 +202,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
 
         # Weiran: the prior has zero mean and covariance L*L' (to ensure PSD).
         self.vae_prior_L = Variable(torch.eye(2 * self.fdim * self.T).type(self.dtype).to(device), requires_grad=True)
+        self.mu = torch.zeros(2 * self.T * self.fdim).to(device).clone().detach().requires_grad_(True)
 
         # Weiran: based on my experience, reconstruction network would better be a DNN than RNNs.
         if self.recon_lambda > 0:
@@ -231,7 +218,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         samples = mu + eps * std
-
+        
         return mu, logvar, samples
 
 
@@ -290,26 +277,56 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                 hs_pad1, _ = self.encoder(xs_pad * masks_in, ilens)
                 if self.use_vae:
                     # Samples are now used for reconstruction.
-                    _, _, hs_pad1 = self.vae_split(hs_pad1, self.fdim)
+                    hs_mu, _, hs_pad1 = self.vae_split(hs_pad1, self.fdim)
+                    #hs_pad1 = hs_mu
                 recon_loss = torch.sum(((self.decoder(hs_pad1) - xs_pad) ** 2) * masks_out) / torch.sum(masks_out)
         else:
             recon_loss = 0.0
         
-        #if self.use_vae:
-        #    hs_pad = hs_pad_mu
-
         # Weiran: always compute per-frame cov matrix and monitor the ortho_loss.
         ortho_loss, self.cov_frame = ortho_reg_Y(hs_pad, hmask)
+        if self.use_vae:
+            _, self.mu_cov_frame = ortho_reg_Y(mu, hmask)
+        else:
+            self.mu_cov_frame = self.cov_frame
         if self.encoder_type == "lin" and not self.use_vae:
             # This is a special setting that mimics the original DCA.
             ortho_loss = ortho_reg_fn(self.encoder.fc1.weight.t())
 
         # Weiran: always compute the 2T-time cov matrix and monitor the pi.
         if self.use_vae:
-            self.cov = torch.mm(self.vae_prior_L, self.vae_prior_L.t()) + self.cov_diag_reg * torch.eye(2 * self.T * self.fdim).to(self.device)
+            self.cov = torch.mm(self.vae_prior_L, self.vae_prior_L.t())
+            self.post_cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.cov_diag_reg)
+            
+            self.post_cov = matrix_toeplitzify(self.post_cov, 2 * self.T, self.fdim) + self.cov_diag_reg * torch.eye(2 * self.T * self.fdim).to(self.device)
+            self.cov = matrix_toeplitzify(self.cov, 2*self.T, self.fdim) + self.cov_diag_reg * torch.eye(2 * self.T * self.fdim).to(self.device)
         else:
             self.cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.cov_diag_reg)
-        pi = calc_pi_from_cov(self.cov)
+
+        if not self.use_vae:
+            if self.use_dim_pi:
+                pi = 0.
+                weights = torch.ones(self.fdim)
+                for i in range(self.fdim):
+                    sub_pi = calc_pi_from_cov(self.cov[i::self.fdim, i::self.fdim]) * weights[i]
+                    pi += sub_pi
+            else:
+                pi = calc_pi_from_cov(self.cov)
+        else:
+            if self.use_dim_pi:
+                pi = 0.
+                weights = torch.ones(self.fdim)
+                for i in range(self.fdim):
+                    if not self.use_prior_pi:
+                        sub_pi = calc_pi_from_cov(self.post_cov[i::self.fdim, i::self.fdim]) * weights[i]
+                    else:
+                        sub_pi = calc_pi_from_cov(self.cov[i::self.fdim, i::self.fdim]) * weights[i]
+                    pi += sub_pi
+            else:
+                if self.use_prior_pi:
+                    pi = calc_pi_from_cov(self.cov)
+                else:
+                    pi = calc_pi_from_cov(self.post_cov)
 
         # Compile the total loss.
         if self.use_cpc:
@@ -319,18 +336,20 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             '''
             # kld = - 0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
             # latent_loss = btcvae_loss((mu, logvar), samples, n_data=self.n_data, is_mss=False, alpha=1., beta=20.)
-            latent_loss = vdca_loss((mu, logvar), hs_pad, hmask, self.mu, self.vae_prior_L, self.T, n_data=self.n_data,
-                                    alpha=self.vae_alpha, beta=self.vae_beta, gamma=self.vae_gamma, zeta=self.vae_zeta)
             '''
-            rate_loss = vdca_rate_loss((mu, logvar), hs_pad, hmask, self.T, self.cov)
+            rate_loss = vdca_loss_junwen((mu, logvar), hs_pad, self.mu, self.cov, self.vae_prior_L, self.T, n_data=self.n_data,
+                                    alpha=self.vae_alpha, beta=self.vae_beta, gamma=self.vae_gamma, zeta=self.vae_zeta)
+            key_loss = -pi + self.rate_lambda * rate_loss + self.ortho_lambda * ortho_loss #+ 0.1 * self.cov.norm(2)
+            
+            '''rate_loss = vdca_rate_loss((mu, logvar), hs_pad, hmask, self.T, self.cov)
             # Weiran: according "Fixing a broken ELBO" and beta-VAE, the beta is ratio between rate and log-likelihood.
-            key_loss = -pi + self.vae_beta * rate_loss + self.ortho_lambda * ortho_loss
+            key_loss = -pi + self.vae_beta * self.recon_lambda * rate_loss'''
         else:
             # For deterministic method, we use pi and ortho_loss.
             key_loss = -pi + self.ortho_lambda * ortho_loss
 
         self.loss = key_loss + self.recon_lambda * recon_loss
-        return self.loss, float(pi), float(ortho_loss), float(recon_loss), float(rate_loss), (self.cov_frame).detach().cpu().numpy(), (self.cov).detach().cpu().numpy()
+        return self.loss, float(pi), float(ortho_loss), float(recon_loss), float(rate_loss), (self.cov_frame).detach().cpu().numpy(), (self.mu_cov_frame).detach().cpu().numpy()
 
 
     def encode(self, x):
@@ -345,12 +364,12 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
 
 
 # Move training code out of model definition.
-def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, batch_size=50, max_epochs=500, device="cuda:0"):
+def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu=False, batch_size=50, max_epochs=500, device="cuda:0", X_test=None, Y_test=None, use_writer=True):
     if use_gpu:
         model = model.to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    optim_prior = torch.optim.Adam([model.vae_prior_L], lr=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optim_prior = torch.optim.Adam([model.vae_prior_L], lr=lr)
     input_context = model.input_context
 
     # X_train is a sequence of input sequences, whose lengths are saved in L_train.
@@ -395,26 +414,27 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, b
             # loss, pi, loss_orth, loss_recon, _ = model(x_batch, l_batch)
             #print("minibatch %03d/%03d: pi=%f" % (i, n_batch_train, pi))
             loss.backward()
+            total_norm = 0.
+            for p in model.parameters():
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+            total_norm = total_norm ** (1/2.)
+            #print("total_norm:", total_norm)
             loss.detach()
             optimizer.step()
             optim_prior.step()
-            #model.chol = model.chol * cov_mask
-            #model.chol = (model.chol+model.chol.t()) / 2.
 
             total_loss += loss
             total_pi += pi
-            total_ortho_loss += loss_orth * total_len_batch
-            total_loss_recon += loss_recon * total_len_batch
-            total_loss_rate += loss_rate * total_len_batch
-
-        #print(torch.matmul(model.chol, model.chol.t())[:6, :6])
-        #print(model.chol[:6, :6])
+            total_ortho_loss += loss_orth
+            total_loss_recon += loss_recon
+            total_loss_rate += loss_rate
 
         avg_loss_train = total_loss / n_batch_train
         avg_pi_train = total_pi / n_batch_train
-        avg_ortho_loss_train = total_ortho_loss / sum(L_train)
-        avg_recon_loss_train = total_loss_recon / sum(L_train)
-        avg_rate_loss_train = total_loss_rate / sum(L_train)
+        avg_ortho_loss_train = total_ortho_loss / n_batch_train
+        avg_recon_loss_train = total_loss_recon / n_batch_train
+        avg_rate_loss_train = total_loss_rate / n_batch_train
         print("epoch %d, train avg loss=%f, pi=%f, ortho_loss=%f, recon_loss=%f, rate_loss=%f" %
               (epoch, avg_loss_train, avg_pi_train, avg_ortho_loss_train, avg_recon_loss_train, avg_rate_loss_train))
 
@@ -425,7 +445,8 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, b
         total_loss_recon = 0.0
         total_loss_rate = 0.0
         total_cov_frame = np.zeros([model.fdim, model.fdim])
-        total_cov = np.zeros([2*model.fdim*model.T, 2*model.fdim*model.T])
+        #total_cov = np.zeros([2*model.fdim*model.T, 2*model.fdim*model.T])
+        total_cov = np.zeros([model.fdim, model.fdim])
 
         for i in range(int(math.ceil(n_valid / batch_size))):
             x_batch_list = [torch.from_numpy(_context_concat(X_valid[_],input_context)).float() for _ in range(i*batch_size, min((i+1)*batch_size, n_valid))]
@@ -449,29 +470,42 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, use_gpu=False, b
 
             total_loss += loss.detach()
             total_pi += pi
-            total_ortho_loss += loss_orth * total_len_batch
-            total_loss_recon += loss_recon * total_len_batch
-            total_loss_rate += loss_rate * total_len_batch
-            total_cov_frame += cov_frame * total_len_batch
-            total_cov += cov * total_len_batch
+            total_ortho_loss += loss_orth
+            total_loss_recon += loss_recon
+            total_loss_rate += loss_rate
+            total_cov_frame += cov_frame
+            total_cov += cov
 
         avg_loss_valid = total_loss / n_batch_valid
         avg_pi_valid = total_pi / n_batch_valid
-        avg_ortho_loss_valid = total_ortho_loss / sum(L_valid)
-        avg_recon_loss_valid = total_loss_recon / sum(L_valid)
-        avg_rate_loss_valid = total_loss_rate / sum(L_valid)
-        avg_cov_frame = total_cov_frame / sum(L_valid)
-        avg_cov = total_cov / sum(L_valid)
+        avg_ortho_loss_valid = total_ortho_loss / n_batch_valid
+        avg_recon_loss_valid = total_loss_recon / n_batch_valid
+        avg_rate_loss_valid = total_loss_rate / n_batch_valid
+        avg_cov_frame = total_cov_frame / n_batch_valid
+        avg_cov = total_cov / n_batch_valid
         print("epoch %d, valid avg loss=%f, pi=%f, ortho_loss=%f, recon_loss=%f, rate_loss=%f" %
               (epoch, avg_loss_valid, avg_pi_valid, avg_ortho_loss_valid, avg_recon_loss_valid, avg_rate_loss_valid))
         print(avg_cov_frame)
+        print(avg_cov)
 
         # Write stats.
-        writer.add_scalar('train/pi', avg_pi_train, epoch)
-        writer.add_scalar('train/orth', avg_ortho_loss_train, epoch)
-        writer.add_scalar('train/recon', avg_recon_loss_train, epoch)
-        writer.add_scalar('valid/pi', avg_pi_valid, epoch)
-        writer.add_scalar('valid/orth', avg_ortho_loss_valid, epoch)
-        writer.add_scalar('valid/recon', avg_recon_loss_valid, epoch)
+        if use_writer:
+            writer.add_scalar('train/pi', avg_pi_train, epoch)
+            writer.add_scalar('train/orth', avg_ortho_loss_train, epoch)
+            writer.add_scalar('train/recon', avg_recon_loss_train, epoch)
+            writer.add_scalar('train/rate', avg_rate_loss_train, epoch)
+            writer.add_scalar('valid/pi', avg_pi_valid, epoch)
+            writer.add_scalar('valid/orth', avg_ortho_loss_valid, epoch)
+            writer.add_scalar('valid/recon', avg_recon_loss_valid, epoch)
+            writer.add_scalar('valid/rate', avg_rate_loss_valid, epoch)
+
+            mse = evaluate_match(model, X_test, Y_test, verbose=0)
+            writer.add_scalar('valid/match_mse', mse, epoch)
 
     return model
+
+def evaluate_match(model, X_test, Y_test, verbose=1):
+    Y_pred = model.encode(X_test)
+    recon, mse = match(Y_pred, Y_test, 15000, model.device, verbose=verbose)
+    return mse
+

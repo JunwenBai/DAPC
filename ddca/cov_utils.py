@@ -21,31 +21,6 @@ def torch_toeplitzify(cov, T, d, symmetrize=True):
             cov_toep[i * d:(i + 1) * d, (delta_t + i) * d:(delta_t + i + 1) * d] = avg_upper
     return cov_toep
 
-
-"""
-
-# Weiran: I tested that the two functions are equivalent, with following tests.
-
-import torch
-from ddca.cov_utils import torch_toeplitzify, matrix_toeplitzify
-X=torch.FloatTensor(100, 10).uniform_(0, 1)
-cov=torch.mm(X.t(), X)/100
-cov=torch.FloatTensor(10, 10).uniform_(0, 1)
-
-a=torch_toeplitzify(cov, 10, 1)
-b=matrix_toeplitzify(cov, 10, 1)
-torch.sum(torch.abs(a-b))
-
-c=torch_toeplitzify(cov, 5, 2)
-d=matrix_toeplitzify(cov, 5, 2)
-torch.sum(torch.abs(c-d))
-
-e=torch_toeplitzify(cov, 2, 5)
-f=matrix_toeplitzify(cov, 2, 5)
-torch.sum(torch.abs(e-f))
-
-"""
-
 def matrix_toeplitzify(cov, T, d):
     # pdb.set_trace()
     # First make sure it is symmetric.
@@ -54,7 +29,7 @@ def matrix_toeplitzify(cov, T, d):
     cov = cov.reshape(T, d, T, d).permute(1, 3, 0, 2).reshape(d*d, T*T)
     cov = torch.cat([cov, torch.zeros([d*d, T], dtype=cov.dtype, device=cov.device)], 1)
 
-    indicator = torch.ones([T+1, T]).triu().reshape(1, (T+1)*T).repeat(d*d, 1)
+    indicator = torch.ones([T+1, T]).triu().reshape(1, (T+1)*T).repeat(d*d, 1).to(cov.device)
     cov_unfold = cov.unfold(1, T+1, T+1)
     ind_unfold = indicator.unfold(1, T+1, T+1)
     avg = torch.sum(cov_unfold[:, :, :-1] * ind_unfold[:, :, :-1], 1, keepdim=True) / torch.sum(ind_unfold[:, :, :-1], 1, keepdim=True)
@@ -66,7 +41,6 @@ def matrix_toeplitzify(cov, T, d):
     result = (avg + avg.permute(1, 0, 3, 2)) / (indicator + indicator.transpose(2, 3))
     result = result.permute(2, 0, 3, 1).reshape(T*d, T*d)
     return result
-
 
 def rectify_spectrum(cov, epsilon=1e-6, verbose=False):
     """Rectify the spectrum of a covariance matrix.
@@ -168,3 +142,99 @@ def calc_cov_from_data(xs_pad, src_mask, T, toeplitzify=True, reg=0.0):
 
     return cov_est
 
+
+def calc_cov_from_cross_cov_mats(cross_cov_mats):
+    """Calculates the N*T-by-N*T spatiotemporal covariance matrix based on
+    T N-by-N cross-covariance matrices.
+
+    Parameters
+    ----------
+    cross_cov_mats : np.ndarray, shape (T, N, N)
+        Cross-covariance matrices: cross_cov_mats[dt] is the
+        cross-covariance between X(t) and X(t+dt), where each
+        of X(t) and X(t+dt) is a N-dimensional vector.
+
+    Returns
+    -------
+    cov : np.ndarray, shape (N*T, N*T)
+        Big covariance matrix, stationary in time by construction.
+    """
+
+    N = cross_cov_mats.shape[1]
+    T = len(cross_cov_mats)
+
+    cross_cov_mats_repeated = []
+    for i in range(T):
+        for j in range(T):
+            if i > j:
+                cross_cov_mats_repeated.append(cross_cov_mats[abs(i - j)])
+            else:
+                cross_cov_mats_repeated.append(cross_cov_mats[abs(i - j)].t())
+
+    cov_tensor = torch.reshape(torch.stack(cross_cov_mats_repeated), (T, T, N, N))
+    cov = torch.cat([torch.cat([cov_ii_jj for cov_ii_jj in cov_ii], dim=1) for cov_ii in cov_tensor])
+
+    return cov
+
+def calc_pi_from_cross_cov_mats(cross_cov_mats, proj=None):
+    """Calculates predictive information for a spatiotemporal Gaussian
+    process with T-1 N-by-N cross-covariance matrices.
+
+    Parameters
+    ----------
+    cross_cov_mats : np.ndarray, shape (T, N, N)
+        Cross-covariance matrices: cross_cov_mats[dt] is the
+        cross-covariance between X(t) and X(t+dt), where each
+        of X(t) and X(t+dt) is a N-dimensional vector.
+    proj: np.ndarray, shape (N, d), optional
+        If provided, the N-dimensional data are projected onto a d-dimensional
+        basis given by the columns of proj. Then, the mutual information is
+        computed for this d-dimensional timeseries.
+
+    Returns
+    -------
+    PI : float
+        Mutual information in nats.
+    """
+    #print("cross_cov_mats_proj:", cross_cov_mats_proj.shape)
+    cov_2_T_pi = calc_cov_from_cross_cov_mats(cross_cov_mats)
+    #print("cov_2_T_pi:", cov_2_T_pi.shape)
+    PI = calc_pi_from_cov(cov_2_T_pi)
+
+    return PI
+
+def calc_cross_cov_mats_from_cov(cov, T, N):
+    """Calculates T N-by-N cross-covariance matrices given
+    a N*T-by-N*T spatiotemporal covariance matrix by
+    averaging over off-diagonal cross-covariance blocks with
+    constant `|t1-t2|`.
+    Parameters
+    ----------
+    N : int
+        Numbner of spatial dimensions.
+    T: int
+        Number of time-lags.
+    cov : np.ndarray, shape (N*T, N*T)
+        Spatiotemporal covariance matrix.
+    Returns
+    -------
+    cross_cov_mats : np.ndarray, shape (T, N, N)
+        Cross-covariance matrices.
+    """
+
+    cross_cov_mats = torch.zeros((T, N, N)).to(cov.device)
+
+    for delta_t in range(T):
+        to_avg_lower = torch.zeros((T - delta_t, N, N))
+        to_avg_upper = torch.zeros((T - delta_t, N, N))
+
+        for i in range(T - delta_t):
+            to_avg_lower[i, :, :] = cov[(delta_t + i) * N:(delta_t + i + 1) * N, i * N:(i + 1) * N]
+            to_avg_upper[i, :, :] = cov[i * N:(i + 1) * N, (delta_t + i) * N:(delta_t + i + 1) * N]
+
+        avg_lower = to_avg_lower.mean(axis=0)
+        avg_upper = to_avg_upper.mean(axis=0)
+
+        cross_cov_mats[delta_t, :, :] = 0.5 * (avg_lower + avg_upper.t())
+
+    return cross_cov_mats

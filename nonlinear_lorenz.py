@@ -12,7 +12,7 @@ from ddca.ddca import DynamicalComponentsAnalysis
 from ddca.ddca import fit_ddca
 from ddca.utils import _context_concat, parsegpuid
 from ddca.data_gen import gen_nonlinear_noisy_lorenz, gen_lorenz_data
-from ddca.data_process import match, split, chunk_long_seq
+from ddca.data_process import match, split, chunk_long_seq, smoothen
 from ddca.solver import LIN, DNN, KERNEL
 from ddca.plotting import plot_figs
 from dca import DynamicalComponentsAnalysis as Linear_DCA
@@ -31,6 +31,8 @@ def get_parser():
     parser.add_argument("--T", default=4, help="Time steps for estimating PI", type=int)
     parser.add_argument("--ortho_lambda", default=0.0, help="Regularization parameter for orthogonality", type=float)
     parser.add_argument("--recon_lambda", default=0.0, help="Regularization parameter for reconstruction", type=float)
+    parser.add_argument("--rate_lambda", default=0.0, help="Regularization parameter for latent space matching", type=float)
+    parser.add_argument("--lr", default=1e-3, help="Learning rate", type=float)
     parser.add_argument("--dropout", default=0.0, help="Dropout probability of networks.", type=float)
     parser.add_argument("--batchsize", default=20, help="Number of sequences in each minibatch", type=int)
     parser.add_argument("--encoder_type", default="lin", type=str, choices=["lin", "transformer", "dnn", "gru", "lstm", "bgru", "blstm"])
@@ -38,11 +40,19 @@ def get_parser():
     parser.add_argument("--epochs", default=50, help="Number of training epochs", type=int)
     parser.add_argument('--use_cpc', default=False, type=strtobool, help='Whether to use the CPC loss')
     parser.add_argument('--masked_recon', default=False, type=strtobool, help='Whether to use masked reconstruction loss')
+    parser.add_argument('--use_vae', default=False, type=strtobool, help='Whether to use VAE instead of AE')
+    parser.add_argument('--use_prior_pi', default=False, type=strtobool, help='Whether to compute pi on the prior')
+    parser.add_argument('--use_dim_pi', default=False, type=strtobool, help='Whether to use dim-wise pi')
     parser.add_argument("--gpuid", default="0", help="ID of gpu device to be used", type=str)
     parser.add_argument("--seed", default=0, help="Random seed", type=int)
-    parser.add_argument('--use_vae', default=False, type=strtobool, help='Whether to use VAE instead of AE')
     return parser
 
+def create_writer_name(writer_path):
+    if not os.path.exists(writer_path): return writer_path
+    cnt = 1
+    while os.path.exists(writer_path+"_"+str(cnt)):
+        cnt += 1
+    return writer_path+"_"+str(cnt)
 
 def main(args):
     parser = get_parser()
@@ -63,8 +73,8 @@ def main(args):
     T = args.T
     fdim = args.fdim
     encoder_name = args.encoder_type+"-cpc" if args.use_cpc else args.encoder_type
-    params = 'encoder={}_fdim={}_context={}_T={}_bs={}_dropout={}_ortho-lambda={}_recon-lambda={}_seed={}_vae={}_cpc={}'.format(
-			encoder_name, args.fdim, args.input_context, args.T, args.batchsize, args.dropout, args.ortho_lambda, args.recon_lambda, args.seed, args.use_vae, args.use_cpc)
+    params = 'encoder={}_fdim={}_context={}_T={}_lr={}_bs={}_dropout={}_ortho-lambda={}_recon-lambda={}_seed={}_vae={}_priorpi={}_dimpi={}_cpc={}_{}_{}_{}_{}'.format(
+			encoder_name, args.fdim, args.input_context, args.T, args.lr, args.batchsize, args.dropout, args.ortho_lambda, args.recon_lambda, args.seed, args.use_vae, args.use_prior_pi, args.use_dim_pi,  args.use_cpc, args.vae_alpha, args.vae_beta, args.vae_gamma, args.vae_zeta)
     print(params)
 
     idim = 30  # lift projection dim
@@ -75,18 +85,6 @@ def main(args):
 
     print("Generating ground truth dynamics ...")
     X_dynamics = gen_lorenz_data(num_samples)  # 10000 * 3
-    
-    '''Y = torch.from_numpy(X_dynamics).view(-1).unfold(0, 2*4*3, 3)
-    Y_mean = torch.mean(Y, 0, keepdims=True)
-    print("Y:", Y.shape, Y.dtype)
-    print("Y_mean:", Y_mean.shape)
-    Y = Y - Y_mean
-    #self.hs_mean = hs_pad.view([B, maxlen*d]).unfold(1, 2*self.T*d, d).mean(0).mean(0)
-    cov = torch.matmul(Y.t(), Y)/(Y.shape[0])
-    ax = sns.heatmap(cov.detach().numpy(), linewidth=0.05)
-    print(Y_mean)
-    plt.savefig("pngs/gt.png")
-    exit()'''
 
     noisy_model = DNN(X_dynamics.shape[1], idim, dropout=0.5)  # DNN lift projection: 3 -> 30 for d-DCA
     # noisy_model = KERNEL(X_dynamics[::25], np.linspace(0.3, 1.0, 30))
@@ -109,7 +107,7 @@ def main(args):
         X_clean_train, X_clean_val = split(X_clean, split_rate)
         X_noisy_train, X_noisy_val = split(X_noisy, split_rate)
         X_dyn_train, X_dyn_val = split(X_dynamics, split_rate)
-        writer = SummaryWriter('runs/ddca_{}'.format(params))
+        writer = SummaryWriter(create_writer_name('runs/ddca_{}'.format(params)))
         
         # Weiran: chunk long sequences to shorter ones.
         chunk_size = 500
@@ -140,8 +138,8 @@ def main(args):
                                                     ortho_lambda=10.0, recon_lambda=0.0,
                                                     dropout=0.0, use_cpc=False, masked_recon=False,
                                                     args=args)
-        dca_model = fit_ddca(dca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, use_gpu,
-                              batch_size=args.batchsize, max_epochs=1, device=device)
+        dca_model = fit_ddca(dca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, args.lr, use_gpu,
+                              batch_size=args.batchsize, max_epochs=50, device=device, use_writer=False)
 
         X_dca = dca_model.encode(
             torch.from_numpy(_context_concat(X_noisy_val[:500], dca_model.input_context)).float().to(device,
@@ -151,40 +149,40 @@ def main(args):
 
         # deep DCA
         print("Training {}".format(encoder_name))
+        X_test = torch.from_numpy(_context_concat(X_noisy_val[:500], 0)).float().to(device)
         ddca_model = DynamicalComponentsAnalysis(idim, fdim=fdim, T=T, encoder_type=args.encoder_type,
                                                  ortho_lambda=args.ortho_lambda, recon_lambda=args.recon_lambda,
                                                  dropout=args.dropout, use_cpc=args.use_cpc, masked_recon=args.masked_recon,
                                                  use_vae=args.use_vae, n_data=len(X_noisy_train), args=args, device=device)
      
-        #for name, param in ddca_model.named_parameters():
-        #    print(name, param.shape, param.requires_grad)
-        
-        ddca_model = fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs, L_valid, writer, use_gpu,
-                              batch_size=args.batchsize, max_epochs=args.epochs, device=device)
+        ddca_model = fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs, L_valid, writer, args.lr, use_gpu,
+                batch_size=args.batchsize, max_epochs=args.epochs, device=device, X_test=X_test, Y_test=X_dyn_val[:500])
 
         X_ddca = ddca_model.encode(
             torch.from_numpy(_context_concat(X_noisy_val[:500], ddca_model.input_context)).float().to(device,
                                                             dtype=ddca_model.dtype)).cpu().numpy()
         if X_ddca.shape[1] > 3:
             X_ddca = TSNE(n_components=3).fit_transform(X_ddca)
-        print(X_ddca)
+        #print(X_ddca)
         print(np.matmul((X_ddca - X_ddca.mean(0)).T, (X_ddca - X_ddca.mean(0))) / X_ddca.shape[0])
-        #print("------------------")
-        #print(ddca_model.hs_mean)
-        #print("------------------")
-        #print("Matching {}".format(encoder_name))
-        #X_ddca_recon = match(X_ddca, X_dyn_val[:500], 15000, device)
-        ax = sns.heatmap(ddca_model.cov.detach().cpu().numpy(), linewidth=0.05)
-        plt.savefig("pngs/cov_heat_{}.png".format(params))
-        #torch.save(ddca_model.hs_mean, "pts/hs_mean.pt")
-        #torch.save(ddca_model.cov, "pts/cov.pt")
+        
+        if args.use_vae:
+            ax = sns.heatmap(ddca_model.post_cov.detach().cpu().numpy(), linewidth=0.05)
+            plt.savefig("pngs/post_cov_heat_{}.png".format(params))
+            plt.clf()
+            ax = sns.heatmap(ddca_model.cov.detach().cpu().numpy(), linewidth=0.05)
+            plt.savefig("pngs/cov_heat_{}.png".format(params))
+        else:
+            ax = sns.heatmap(ddca_model.cov.detach().cpu().numpy(), linewidth=0.05)
+            plt.savefig("pngs/post_cov_heat_{}.png".format(params))
 
         # match DCA with ground-truth
+        np.save("npys/ddca_bases_{}.npy".format(params), X_ddca)
         print("Matching {}".format(args.base_encoder_type))
-        X_dca_recon = match(X_dca, X_dyn_val[:500], 15000, device)
+        X_dca_recon, _ = match(X_dca, X_dyn_val[:500], 15000, device)
         # match d-DCA with ground-truth
         print("Matching {}".format(encoder_name))
-        X_ddca_recon = match(X_ddca, X_dyn_val[:500], 15000, device)
+        X_ddca_recon, _ = match(X_ddca, X_dyn_val[:500], 15000, device)
 
         # R2 of dca
         r2_dca = 1 - np.sum((X_dca_recon - X_dyn_val[:500]) ** 2) / np.sum(
@@ -206,6 +204,7 @@ def main(args):
 
 if __name__ == "__main__":
     main(sys.argv[1:])
+
 """
 python3 nonlinear_lorenz.py --encoder_type bgru --dropout 0.5 --ortho_lambda 10.0 --recon_lambda 10.0 --gpuid 0
 """
