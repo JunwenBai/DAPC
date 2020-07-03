@@ -73,8 +73,8 @@ def main(args):
     T = args.T
     fdim = args.fdim
     encoder_name = args.encoder_type+"-cpc" if args.use_cpc else args.encoder_type
-    params = 'encoder={}_fdim={}_context={}_T={}_lr={}_bs={}_dropout={}_ortho-lambda={}_recon-lambda={}_seed={}_vae={}_priorpi={}_dimpi={}_cpc={}_{}_{}_{}_{}'.format(
-			encoder_name, args.fdim, args.input_context, args.T, args.lr, args.batchsize, args.dropout, args.ortho_lambda, args.recon_lambda, args.seed, args.use_vae, args.use_prior_pi, args.use_dim_pi,  args.use_cpc, args.vae_alpha, args.vae_beta, args.vae_gamma, args.vae_zeta)
+    params = 'encoder={}_fdim={}_context={}_T={}_lr={}_bs={}_dropout={}_rate-lambda={}_ortho-lambda={}_recon-lambda={}_seed={}_vae={}_priorpi={}_dimpi={}_cpc={}_{}_{}_{}_{}'.format(
+			encoder_name, args.fdim, args.input_context, args.T, args.lr, args.batchsize, args.dropout, args.rate_lambda, args.ortho_lambda, args.recon_lambda, args.seed, args.use_vae, args.use_prior_pi, args.use_dim_pi,  args.use_cpc, args.vae_alpha, args.vae_beta, args.vae_gamma, args.vae_zeta)
     print(params)
 
     idim = 30  # lift projection dim
