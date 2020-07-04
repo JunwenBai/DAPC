@@ -30,7 +30,7 @@ import torch
 from ddca.cov_utils import torch_toeplitzify, matrix_toeplitzify
 X=torch.FloatTensor(100, 10).uniform_(0, 1)
 cov=torch.mm(X.t(), X)/100
-cov=torch.FloatTensor(10, 10).uniform_(0, 1)
+# cov=torch.FloatTensor(10, 10).uniform_(0, 1)
 
 a=torch_toeplitzify(cov, 10, 1)
 b=matrix_toeplitzify(cov, 10, 1)
