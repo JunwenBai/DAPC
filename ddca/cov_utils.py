@@ -22,39 +22,36 @@ def torch_toeplitzify(cov, T, d, symmetrize=True):
     return cov_toep
 
 
-"""
-
-# Weiran: I tested that the two functions are equivalent, with following tests.
-
-import torch
-from ddca.cov_utils import torch_toeplitzify, matrix_toeplitzify
-X=torch.FloatTensor(100, 10).uniform_(0, 1)
-cov=torch.mm(X.t(), X)/100
-# cov=torch.FloatTensor(10, 10).uniform_(0, 1)
-
-a=torch_toeplitzify(cov, 10, 1)
-b=matrix_toeplitzify(cov, 10, 1)
-torch.sum(torch.abs(a-b))
-
-c=torch_toeplitzify(cov, 5, 2)
-d=matrix_toeplitzify(cov, 5, 2)
-torch.sum(torch.abs(c-d))
-
-e=torch_toeplitzify(cov, 2, 5)
-f=matrix_toeplitzify(cov, 2, 5)
-torch.sum(torch.abs(e-f))
-
-"""
-
 def matrix_toeplitzify(cov, T, d):
-    # pdb.set_trace()
+    """
+    # Weiran: I tested that the two functions are equivalent, with following tests.
+
+    import torch
+    from ddca.cov_utils import torch_toeplitzify, matrix_toeplitzify
+    X=torch.FloatTensor(100, 10).uniform_(0, 1)
+    cov=torch.mm(X.t(), X)/100
+    # cov=torch.FloatTensor(10, 10).uniform_(0, 1)
+
+    a=torch_toeplitzify(cov, 10, 1)
+    b=matrix_toeplitzify(cov, 10, 1)
+    torch.sum(torch.abs(a-b))
+
+    c=torch_toeplitzify(cov, 5, 2)
+    d=matrix_toeplitzify(cov, 5, 2)
+    torch.sum(torch.abs(c-d))
+
+    e=torch_toeplitzify(cov, 2, 5)
+    f=matrix_toeplitzify(cov, 2, 5)
+    torch.sum(torch.abs(e-f))
+    """
+
     # First make sure it is symmetric.
     cov = (cov + cov.t()) / 2.0
 
     cov = cov.reshape(T, d, T, d).permute(1, 3, 0, 2).reshape(d*d, T*T)
     cov = torch.cat([cov, torch.zeros([d*d, T], dtype=cov.dtype, device=cov.device)], 1)
 
-    indicator = torch.ones([T+1, T]).triu().reshape(1, (T+1)*T).repeat(d*d, 1)
+    indicator = torch.ones([T+1, T]).triu().reshape(1, (T+1)*T).repeat(d*d, 1).to(cov.device)
     cov_unfold = cov.unfold(1, T+1, T+1)
     ind_unfold = indicator.unfold(1, T+1, T+1)
     avg = torch.sum(cov_unfold[:, :, :-1] * ind_unfold[:, :, :-1], 1, keepdim=True) / torch.sum(ind_unfold[:, :, :-1], 1, keepdim=True)
@@ -167,4 +164,3 @@ def calc_cov_from_data(xs_pad, src_mask, T, toeplitzify=True, reg=0.0):
         cov_est = cov_est + reg * torch.eye(T*d, T*d, device=cov_est.device)
 
     return cov_est
-

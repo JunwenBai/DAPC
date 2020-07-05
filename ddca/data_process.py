@@ -23,7 +23,7 @@ def smoothen(raw_xs, window_len=12, window='hamming'):
     return ys
 
 
-def match(X, X_true, max_epochs=3000, device="cpu"):  # use a linear mapping to match the reconstructed lorenz attractor and the ground truth attractor
+def match(X, X_true, max_epochs=3000, device="cpu", verbose=1):  # use a linear mapping to match the reconstructed lorenz attractor and the ground truth attractor
     if not isinstance(X, torch.Tensor):
         X = torch.Tensor(X).to(device)  # torch tensorize
     if not isinstance(X_true, torch.Tensor):
@@ -37,11 +37,14 @@ def match(X, X_true, max_epochs=3000, device="cpu"):  # use a linear mapping to 
         loss = F.mse_loss(X_rec, X_true)  # alternative losses: l1
         loss.backward()
         loss.detach()
-        if epoch % 2000 == 0:
+        if epoch % 2000 == 0 and verbose == 1:
             print(epoch, ":", loss.item())
         match_opt.step()
-
-    return match_model(X, None).detach().cpu().numpy()
+    if verbose == 0:
+        print("----------------")
+        print("final:", loss.item())
+        print("----------------")
+    return match_model(X, None).detach().cpu().numpy(), loss.item()
 
 
 def plot_3d_sig(X_dca, plt_idx=300, fig_name="X_dca.png"):  # plot 3-d signals in one figure
