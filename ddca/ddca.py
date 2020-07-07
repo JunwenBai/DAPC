@@ -4,12 +4,11 @@ import logging
 
 import torch
 import torch.nn.functional as F
-from torch.autograd import Variable
 from .solver import LIN, DNN, RNN, TRANSFORMER, ortho_reg_fn, ortho_reg_Y
-from .cov_utils import calc_cov_from_data, calc_pi_from_cov, torch_toeplitzify, calc_cross_cov_mats_from_cov, calc_pi_from_cross_cov_mats, calc_cov_from_cross_cov_mats, matrix_toeplitzify
+from .cov_utils import calc_cov_from_data, calc_pi_from_cov, matrix_toeplitzify
 from .utils import make_non_pad_mask, pad_list, _context_concat, gen_batch_indices
 from .spec_augment import spectral_masking
-from .vae import btcvae_loss, vdca_rate_loss, vdca_loss_junwen
+from .vae import vdca_loss_junwen
 from distutils.util import strtobool
 import pdb
 from .data_process import match
@@ -69,6 +68,8 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                            help='Number of heads for multi head attention')
 
         # VAE-related
+        group.add_argument('--vae_ndata', default=1, type=int,
+                           help='number of samples drawn from posterior')
         group.add_argument('--vae_alpha', default=0., type=float,
                            help='alpha')
         group.add_argument('--vae_beta', default=1., type=float,
@@ -77,6 +78,10 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                            help='gamma')
         group.add_argument('--vae_zeta', default=0., type=float,
                            help='zeta')
+        parser.add_argument('--use_prior_pi', default=False, type=strtobool,
+                            help='Whether to compute pi on the prior')
+        parser.add_argument('--use_dim_pi', default=False, type=strtobool,
+                            help='Whether to use dim-wise pi')
 
         # CPC-related.
         group.add_argument('--cpc_num_pos', default=4, type=int,
@@ -95,7 +100,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                            help='Number of time masks')
 
         # Covariance regularization.
-        group.add_argument('--block_toeplitz', default=False, type=strtobool,
+        group.add_argument('--block_toeplitz', default=True, type=strtobool,
                            help='Whether to Toeplitzify the covariance matrix')
         group.add_argument('--cov_diag_reg', default=1e-6, type=float,
                            help='Constants added to the diagonal of covariance matrix')
@@ -117,15 +122,17 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
 
         return parser
 
-    def __init__(self, idim, fdim, T, encoder_type, ortho_lambda, recon_lambda, dropout,
-            use_cpc, masked_recon, args, use_vae=False, n_data=None, dtype=torch.float32, device="cuda:0"):
+    def __init__(self, obj, idim, fdim, T, encoder_type, ortho_lambda, recon_lambda, dropout,
+            masked_recon, args, dtype=torch.float32, device="cuda:0"):
         super(DynamicalComponentsAnalysis, self).__init__()
+
+        # Objective for representation learning.
+        self.obj = obj
 
         # Splicing options.
         self.input_context = args.input_context
         self.idim = idim * (1+2*self.input_context)
         self.fdim = fdim
-        self.n_data = n_data
 
         # Model params.
         self.device = device
@@ -138,12 +145,6 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         self.dtype = dtype
         self.block_toeplitz = args.block_toeplitz
         self.cov_diag_reg = args.cov_diag_reg
-        self.cov_mask = torch.zeros(2*T*fdim, 2*T*fdim).to(device)
-        for i in range(2*T*fdim):
-            for j in range(2*T*fdim):
-                if abs(i-j) % fdim == 0:
-                    self.cov_mask[i, j] = 1.
-        self.cov_mask.requires_grad_(False)
 
         # Masked reconstruction params.
         self.masked_recon = masked_recon
@@ -153,22 +154,20 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         self.num_time_masks = args.num_time_masks
 
         # VAE params
-        self.use_vae = use_vae
         self.vae_alpha = args.vae_alpha
         self.vae_beta = args.vae_beta
         self.vae_gamma = args.vae_gamma
         self.vae_zeta = args.vae_zeta
         self.use_prior_pi = args.use_prior_pi
         self.use_dim_pi = args.use_dim_pi
-        if self.use_vae:
+        if self.obj == "vae":
             print("VAE coeffs:", self.vae_alpha, self.vae_beta, self.vae_gamma, self.vae_zeta)
 
         # CPC params.
-        self.use_cpc = use_cpc
         self.cpc_num_pos = args.cpc_num_pos
         self.cpc_num_neg = args.cpc_num_neg
 
-        if use_vae:
+        if self.obj == "vae":
             # In case of VAE, we need both mean and variance.
             self.encoder_odim = self.fdim * 2
         else:
@@ -195,14 +194,16 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             self.encoder = RNN(idim=self.idim, elayers=args.encoder_rnn_num_layers, cdim=args.encoder_rnn_hidden_size,
                     hdim=self.encoder_odim, dropout=self.dropout, typ=self.encoder_type)
 
-        if self.use_cpc:
+        if self.obj == "cpc":
             self.cpc_future_enc = LIN(self.idim, self.fdim, dropout=self.dropout)
         else:
             self.cpc_future_enc = None
 
         # Weiran: the prior has zero mean and covariance L*L' (to ensure PSD).
-        self.vae_prior_L = Variable(torch.eye(2 * self.fdim * self.T).type(self.dtype).to(device), requires_grad=True)
-        self.mu = torch.zeros(2 * self.T * self.fdim).to(device).clone().detach().requires_grad_(True)
+        # self.vae_prior_L = torch.nn.Parameter(torch.eye(2 * self.fdim * self.T, dtype=self.dtype).to(device), requires_grad=True)
+        self.pseudo_lens = [500]
+        self.pseudo_inputs = torch.nn.Parameter(torch.zeros([1, 500, self.idim], dtype=self.dtype).uniform_(0, 1).to(device), requires_grad=True)
+        self.vae_posterior_L = torch.nn.Linear(2 * self.fdim * self.T, 2 * self.fdim * self.T)
 
         # Weiran: based on my experience, reconstruction network would better be a DNN than RNNs.
         if self.recon_lambda > 0:
@@ -222,7 +223,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         return mu, logvar, samples
 
 
-    def cpc_latent(self, xs_pad, hs_pad, hmask, ilens):
+    def cpc_latent(self, xs_pad, hs_pad, ilens):
 
         slfidx, posidx, negidx = gen_batch_indices(ilens, max(ilens), range(self.cpc_num_pos), self.cpc_num_neg, portion=1.0)
         fx = hs_pad.view(-1, hs_pad.shape[-1])
@@ -255,10 +256,9 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         # Weiran: for now, both RNN and TRANSFORMER do not reduce the input lengths.
         hs_pad, olens = self.encoder(xs_pad, ilens)
         hmask = make_non_pad_mask(olens.tolist()).to(xs_pad.device)
-        rate_loss = 0.
 
         # Let us change the ortho_loss into latent loss, as they are loss in the feature space.
-        if self.use_vae:
+        if self.obj == "vae":
             # Samples are then used for reconstruction.
             mu, logvar, hs_pad = self.vae_split(hs_pad, self.fdim)
 
@@ -267,7 +267,6 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                 # Normal reconstruction.
                 assert (masks_in is None) and (masks_out is None), "regular reconstruction requires no in/out masks"
                 recon = self.decoder(hs_pad)
-                # recon_loss = compute_recon_mse(recon, xs_pad, hmask)
                 loss = torch.sum((recon.view([-1, self.idim]) - xs_pad.view([-1, self.idim])) ** 2, 1)
                 mask_float = hmask.float().view([-1])
                 recon_loss = torch.sum(torch.mul(loss, mask_float)) / torch.sum(mask_float)
@@ -275,43 +274,41 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                 # Masked reconstruction.
                 assert (masks_in is not None) and (masks_out is not None), "masked reconstruction requires nonzero in/out masks"
                 hs_pad1, _ = self.encoder(xs_pad * masks_in, ilens)
-                if self.use_vae:
+                if self.obj == "vae":
                     # Samples are now used for reconstruction.
-                    hs_mu, _, hs_pad1 = self.vae_split(hs_pad1, self.fdim)
-                    #hs_pad1 = hs_mu
+                    hs_mu1, _, hs_pad1 = self.vae_split(hs_pad1, self.fdim)
+                    #hs_pad1 = hs_mu1
                 recon_loss = torch.sum(((self.decoder(hs_pad1) - xs_pad) ** 2) * masks_out) / torch.sum(masks_out)
         else:
             recon_loss = 0.0
         
         # Weiran: always compute per-frame cov matrix and monitor the ortho_loss.
         ortho_loss, self.cov_frame = ortho_reg_Y(hs_pad, hmask)
-        if self.use_vae:
+        if self.obj == "vae":
             _, self.mu_cov_frame = ortho_reg_Y(mu, hmask)
         else:
             self.mu_cov_frame = self.cov_frame
-        if self.encoder_type == "lin" and not self.use_vae:
+        if self.encoder_type == "lin" and not self.obj == "vae":
             # This is a special setting that mimics the original DCA.
             ortho_loss = ortho_reg_fn(self.encoder.fc1.weight.t())
 
         # Weiran: always compute the 2T-time cov matrix and monitor the pi.
-        if self.use_vae:
-            self.cov = torch.mm(self.vae_prior_L, self.vae_prior_L.t())
+        if self.obj == "vae":
+            # self.cov = torch.mm(self.vae_prior_L, self.vae_prior_L.t()) + self.cov_diag_reg * torch.eye(2 * self.T * self.fdim).to(self.device)
+            # self.cov = matrix_toeplitzify(self.cov, 2*self.T, self.fdim) + self.cov_diag_reg * torch.eye(2 * self.T * self.fdim).to(self.device)
+            pseudo_feats, pseudo_olens = self.encoder(self.pseudo_inputs, self.pseudo_lens)
+            pseudo_hmask = make_non_pad_mask(pseudo_olens.tolist()).to(xs_pad.device)
+            _, _, pseudo_samples = self.vae_split(pseudo_feats, self.fdim)
+            self.cov = calc_cov_from_data(pseudo_samples, pseudo_hmask, 2 * self.T, toeplitzify=False, reg=self.cov_diag_reg)
+
             self.post_cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.cov_diag_reg)
-            
             self.post_cov = matrix_toeplitzify(self.post_cov, 2 * self.T, self.fdim) + self.cov_diag_reg * torch.eye(2 * self.T * self.fdim).to(self.device)
-            self.cov = matrix_toeplitzify(self.cov, 2*self.T, self.fdim) + self.cov_diag_reg * torch.eye(2 * self.T * self.fdim).to(self.device)
         else:
             self.cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.cov_diag_reg)
 
-        if not self.use_vae:
-            if self.use_dim_pi:
-                pi = 0.
-                weights = torch.ones(self.fdim)
-                for i in range(self.fdim):
-                    sub_pi = calc_pi_from_cov(self.cov[i::self.fdim, i::self.fdim]) * weights[i]
-                    pi += sub_pi
-            else:
-                pi = calc_pi_from_cov(self.cov)
+        if not self.obj == "vae":
+            # For deterministic methods, not using dim pi.
+            pi = calc_pi_from_cov(self.cov)
         else:
             if self.use_dim_pi:
                 pi = 0.
@@ -329,21 +326,14 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                     pi = calc_pi_from_cov(self.post_cov)
 
         # Compile the total loss.
-        if self.use_cpc:
+        rate_loss = 0.
+        if self.obj == "cpc":
             # Since pi and ortho_loss do not make sense for CPC.
-            key_loss = self.cpc_latent(xs_pad, hs_pad, hmask, ilens)
-        elif self.use_vae:
-            '''
-            # kld = - 0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-            # latent_loss = btcvae_loss((mu, logvar), samples, n_data=self.n_data, is_mss=False, alpha=1., beta=20.)
-            '''
-            rate_loss = vdca_loss_junwen((mu, logvar), hs_pad, self.mu, self.cov, self.vae_prior_L, self.T, n_data=self.n_data,
+            key_loss = self.cpc_latent(xs_pad, hs_pad, ilens)
+        elif self.obj == "vae":
+            rate_loss = vdca_loss_junwen((mu, logvar), hs_pad, hmask, self.T, self.cov, self.vae_posterior_L,
                                     alpha=self.vae_alpha, beta=self.vae_beta, gamma=self.vae_gamma, zeta=self.vae_zeta)
-            key_loss = -pi + self.rate_lambda * rate_loss + self.ortho_lambda * ortho_loss #+ 0.1 * self.cov.norm(2)
-            
-            '''rate_loss = vdca_rate_loss((mu, logvar), hs_pad, hmask, self.T, self.cov)
-            # Weiran: according "Fixing a broken ELBO" and beta-VAE, the beta is ratio between rate and log-likelihood.
-            key_loss = -pi + self.vae_beta * self.recon_lambda * rate_loss'''
+            key_loss = -pi + self.rate_lambda * rate_loss  #+ 0.1 * self.cov.norm(2)
         else:
             # For deterministic method, we use pi and ortho_loss.
             key_loss = -pi + self.ortho_lambda * ortho_loss
@@ -358,18 +348,18 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         self.eval()
         ilens = torch.tensor([x.size(0)], device=x.device).long()
         hs_pad, _ = self.encoder(x.unsqueeze(0), ilens)
-        if self.use_vae:
+        if self.obj == "vae":
             hs_pad, _, _ = self.vae_split(hs_pad, self.fdim)
         return hs_pad.squeeze(0).detach()
 
 
 # Move training code out of model definition.
-def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu=False, batch_size=50, max_epochs=500, device="cuda:0", X_test=None, Y_test=None, use_writer=True):
+def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu=False, batch_size=50, max_epochs=500,
+            snapshot, device="cuda:0", X_match=None, Y_match=None, use_writer=True):
     if use_gpu:
         model = model.to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    optim_prior = torch.optim.Adam([model.vae_prior_L], lr=lr)
     input_context = model.input_context
 
     # X_train is a sequence of input sequences, whose lengths are saved in L_train.
@@ -378,6 +368,8 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu
     n_batch_train = int(math.ceil(n_train / batch_size))
     n_valid = len(X_valid)
     n_batch_valid = int(math.ceil(n_valid / batch_size))
+
+    best_mse = np.inf
 
     for epoch in range(max_epochs):
         model.train()
@@ -397,7 +389,6 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu
             x_batch, l_batch = pad_list(x_batch_list, 0.0).to(device), torch.Tensor(l_batch_list).long().to(device)
 
             optimizer.zero_grad()
-            optim_prior.zero_grad()
             if model.recon_lambda > 0 and model.masked_recon:
                 # Weiran: move these steps into a separate function.
                 masks_in = [spectral_masking(torch.ones_like(x), F=model.spec_mask_F, T=model.spec_mask_T,
@@ -414,15 +405,16 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu
             # loss, pi, loss_orth, loss_recon, _ = model(x_batch, l_batch)
             #print("minibatch %03d/%03d: pi=%f" % (i, n_batch_train, pi))
             loss.backward()
+            """
             total_norm = 0.
             for p in model.parameters():
                 param_norm = p.grad.data.norm(2)
                 total_norm += param_norm.item() ** 2
             total_norm = total_norm ** (1/2.)
-            #print("total_norm:", total_norm)
+            print("total_norm:", total_norm)
+            """
             loss.detach()
             optimizer.step()
-            optim_prior.step()
 
             total_loss += loss
             total_pi += pi
@@ -488,6 +480,12 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu
         print(avg_cov_frame)
         print(avg_cov)
 
+        mse = evaluate_match(model, X_match, Y_match, verbose=0)
+        if mse < best_mse:
+            best_mse = mse
+            print("*** Updating best model! ***")
+            torch.save(model.state_dict(), "best_" + snapshot)
+
         # Write stats.
         if use_writer:
             writer.add_scalar('train/pi', avg_pi_train, epoch)
@@ -498,14 +496,14 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu
             writer.add_scalar('valid/orth', avg_ortho_loss_valid, epoch)
             writer.add_scalar('valid/recon', avg_recon_loss_valid, epoch)
             writer.add_scalar('valid/rate', avg_rate_loss_valid, epoch)
-
-            mse = evaluate_match(model, X_test, Y_test, verbose=0)
             writer.add_scalar('valid/match_mse', mse, epoch)
 
+    print("Resuming from best snapshot ...")
+    model.load_state_dict(torch.load("best_" + snapshot))
     return model
 
-def evaluate_match(model, X_test, Y_test, verbose=1):
-    Y_pred = model.encode(X_test)
-    recon, mse = match(Y_pred, Y_test, 15000, model.device, verbose=verbose)
+def evaluate_match(model, X_match, Y_match, verbose=1):
+    Y_pred = model.encode(X_match)
+    recon, mse = match(Y_pred, Y_match, 15000, model.device, verbose=verbose)
     return mse
 

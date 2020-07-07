@@ -3,6 +3,7 @@ import torch
 import scipy as sp
 import pdb
 
+"""
 def torch_toeplitzify(cov, T, d, symmetrize=True):
     cov_toep = torch.zeros(T * d, T * d, device=cov.device)
     for delta_t in range(T):
@@ -20,6 +21,7 @@ def torch_toeplitzify(cov, T, d, symmetrize=True):
             cov_toep[(delta_t + i) * d:(delta_t + i + 1) * d, i * d:(i + 1) * d] = avg_lower
             cov_toep[i * d:(i + 1) * d, (delta_t + i) * d:(delta_t + i + 1) * d] = avg_upper
     return cov_toep
+"""
 
 
 def matrix_toeplitzify(cov, T, d):
@@ -157,7 +159,7 @@ def calc_cov_from_data(xs_pad, src_mask, T, toeplitzify=True, reg=0.0):
 
     cov_est = torch.mul(xs_with_lags, mask_float).t().matmul(xs_with_lags) / torch.sum(mask_float)
     if toeplitzify:
-        cov_est = torch_toeplitzify(cov_est, T, d)
+        cov_est = matrix_toeplitzify(cov_est, T, d)
 
     # rectify_spectrum(cov_est, verbose=False)
     if reg>0:

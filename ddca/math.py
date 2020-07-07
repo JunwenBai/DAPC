@@ -1,12 +1,10 @@
 
 import math
-
-from tqdm import trange, tqdm
 import torch
 
 
 def matrix_log_density_gaussian(x, mu, logvar):
-    """Calculates log density of a Gaussian for all combination of bacth pairs of
+    """Calculates log density of a Gaussian for all combination of batch pairs of
     `x` and `mu`. I.e. return tensor of shape `(batch_size, batch_size, dim)`
     instead of (batch_size, dim) in the usual log density.
 
@@ -27,13 +25,17 @@ def matrix_log_density_gaussian(x, mu, logvar):
     if x.ndim == 2:
         batch_size, dim = x.shape
         x = x.view(batch_size, 1, dim)
-        mu = mu.view(1, batch_size, dim)
-        logvar = logvar.view(1, batch_size, dim)
+        mu = mu.view(1, -1, dim)
+        logvar = logvar.view(1, -1, dim)
     else:
+        # Weiran: changed to sampling across different utts.
+        raise ValueError("latent samples must be collected in a matrix!")
+        """
         batch_size, seq_len, dim = x.shape
         x = x.view(batch_size, seq_len, 1, dim)
         mu = mu.view(batch_size, 1, seq_len, dim)
         logvar = logvar.view(batch_size, 1, seq_len, dim)
+        """
     return log_density_gaussian(x, mu, logvar)
 
 
