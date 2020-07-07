@@ -82,6 +82,10 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                             help='Whether to compute pi on the prior')
         parser.add_argument('--use_dim_pi', default=False, type=strtobool,
                             help='Whether to use dim-wise pi')
+        parser.add_argument('--vae_pseudo_utts', default=1, type=int,
+                            help='Number of pseudo utterance')
+        parser.add_argument('--vae_pseudo_maxlen', default=500, type=int,
+                            help='Number of frames for pseudo inputs')
 
         # CPC-related.
         group.add_argument('--cpc_num_pos', default=4, type=int,
@@ -161,7 +165,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         self.use_prior_pi = args.use_prior_pi
         self.use_dim_pi = args.use_dim_pi
         if self.obj == "vae":
-            print("VAE coeffs:", self.vae_alpha, self.vae_beta, self.vae_gamma, self.vae_zeta)
+            print("VAE coeffs: alpha=%f, beta=%f, gamma=%f, zeta=%f" % (self.vae_alpha, self.vae_beta, self.vae_gamma, self.vae_zeta))
 
         # CPC params.
         self.cpc_num_pos = args.cpc_num_pos
@@ -201,8 +205,12 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
 
         # Weiran: the prior has zero mean and covariance L*L' (to ensure PSD).
         # self.vae_prior_L = torch.nn.Parameter(torch.eye(2 * self.fdim * self.T, dtype=self.dtype).to(device), requires_grad=True)
-        self.pseudo_lens = [500]
-        self.pseudo_inputs = torch.nn.Parameter(torch.zeros([1, 500, self.idim], dtype=self.dtype).uniform_(0, 1).to(device), requires_grad=True)
+
+        # The pseudo input approach.
+        self.vae_pseudo_utts = args.vae_pseudo_utts
+        self.vae_pseudo_maxlen = args.vae_pseudo_maxlen
+        self.pseudo_lens = None
+        self.pseudo_inputs = torch.nn.Parameter(torch.zeros([args.vae_pseudo_utts, args.vae_pseudo_maxlen, self.idim], dtype=self.dtype).uniform_(0, 1).to(device), requires_grad=True)
         self.vae_posterior_L = torch.nn.Linear(2 * self.fdim * self.T, 2 * self.fdim * self.T)
 
         # Weiran: based on my experience, reconstruction network would better be a DNN than RNNs.
@@ -211,6 +219,15 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
         else:
             self.decoder = None
 
+    def set_pseudo_inputs(self, pseudo_inputs, pseudo_lens):
+        """Initialize parameters."""
+        with torch.no_grad():
+            assert pseudo_inputs.shape[0] == self.pseudo_inputs.shape[0], "pseudo inputs number mismatch"
+            assert pseudo_inputs.shape[1] == self.pseudo_inputs.shape[1], "pseudo inputs length mismatch"
+            assert pseudo_inputs.shape[2] == self.pseudo_inputs.shape[2], "pseudo inputs dimension mismatch"
+            print("Initializing pseudo inputs!")
+            self.pseudo_inputs.copy_(pseudo_inputs)
+            self.pseudo_lens = pseudo_lens
 
     def vae_split(self, hs_pad, split_size):
 
@@ -298,11 +315,10 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             # self.cov = matrix_toeplitzify(self.cov, 2*self.T, self.fdim) + self.cov_diag_reg * torch.eye(2 * self.T * self.fdim).to(self.device)
             pseudo_feats, pseudo_olens = self.encoder(self.pseudo_inputs, self.pseudo_lens)
             pseudo_hmask = make_non_pad_mask(pseudo_olens.tolist()).to(xs_pad.device)
-            _, _, pseudo_samples = self.vae_split(pseudo_feats, self.fdim)
+            pseudo_samples, _, _ = self.vae_split(pseudo_feats, self.fdim)
             self.cov = calc_cov_from_data(pseudo_samples, pseudo_hmask, 2 * self.T, toeplitzify=False, reg=self.cov_diag_reg)
 
             self.post_cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.cov_diag_reg)
-            self.post_cov = matrix_toeplitzify(self.post_cov, 2 * self.T, self.fdim) + self.cov_diag_reg * torch.eye(2 * self.T * self.fdim).to(self.device)
         else:
             self.cov = calc_cov_from_data(hs_pad, hmask, 2 * self.T, toeplitzify=self.block_toeplitz, reg=self.cov_diag_reg)
 
@@ -355,7 +371,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
 
 # Move training code out of model definition.
 def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu=False, batch_size=50, max_epochs=500,
-            snapshot, device="cuda:0", X_match=None, Y_match=None, use_writer=True):
+            device="cuda:0", snapshot='ddca_snapshot', X_match=None, Y_match=None, use_writer=True):
     if use_gpu:
         model = model.to(device)
 
@@ -387,6 +403,9 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu
             l_batch_list = [L_train[_] for _ in idx_batch]
             total_len_batch = sum(l_batch_list)
             x_batch, l_batch = pad_list(x_batch_list, 0.0).to(device), torch.Tensor(l_batch_list).long().to(device)
+
+            if epoch==0 and i==0:
+                model.set_pseudo_inputs(x_batch[:model.vae_pseudo_utts, :model.vae_pseudo_maxlen, :], l_batch[:model.vae_pseudo_utts])
 
             optimizer.zero_grad()
             if model.recon_lambda > 0 and model.masked_recon:

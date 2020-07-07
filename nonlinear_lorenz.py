@@ -143,7 +143,7 @@ def main(args):
                                                     dropout=0.0, masked_recon=False,
                                                     args=args)
         dca_model = fit_ddca(dca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, args.lr, use_gpu,
-                              batch_size=args.batchsize, max_epochs=1, device=device, X_match=X_match, Y_match=Y_match, use_writer=False)
+                              batch_size=args.batchsize, max_epochs=1, device=device, snapshot="lin_ddca.cpt", X_match=X_match, Y_match=Y_match, use_writer=False)
 
         X_dca = dca_model.encode(
             torch.from_numpy(_context_concat(X_noisy_val[:500], dca_model.input_context)).float().to(device,
@@ -159,7 +159,7 @@ def main(args):
                                                  args=args, device=device)
      
         ddca_model = fit_ddca(ddca_model, X_train_seqs, L_train, X_valid_seqs, L_valid, writer, args.lr, use_gpu,
-                batch_size=args.batchsize, max_epochs=args.epochs, device=device, X_match=X_match, Y_match=Y_match)
+                batch_size=args.batchsize, max_epochs=args.epochs, device=device, snapshot=params + ".cpt", X_match=X_match, Y_match=Y_match)
 
         X_ddca = ddca_model.encode(
             torch.from_numpy(_context_concat(X_noisy_val[:500], ddca_model.input_context)).float().to(device,
