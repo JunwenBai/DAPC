@@ -183,7 +183,7 @@ class TRANSFORMER(nn.Module):
 
     def __init__(self, idim, odim, adim, aheads, eunits, elayers, input_layer, dropout, death_rate=0.0):
         super(TRANSFORMER, self).__init__()
-        self.encoder = TRANSFORMER(
+        self.encoder = Encoder(
             idim=idim,
             attention_dim=adim,
             attention_heads=aheads,
