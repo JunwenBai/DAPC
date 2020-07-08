@@ -181,7 +181,7 @@ def reset_backward_rnn_state(states):
 
 class TRANSFORMER(nn.Module):
 
-    def __init__(self, idim, odim, adim, aheads, eunits, elayers, input_layer, dropout, death_rate=0.0):
+    def __init__(self, idim, odim, adim, aheads, eunits, elayers, input_layer, dropout_rate, death_rate=0.0):
         super(TRANSFORMER, self).__init__()
         self.encoder = Encoder(
             idim=idim,
@@ -190,10 +190,10 @@ class TRANSFORMER(nn.Module):
             linear_units=eunits,
             num_blocks=elayers,
             input_layer=input_layer,
-            dropout_rate=dropout,
+            dropout_rate=dropout_rate,
             death_rate=death_rate,
         )
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = nn.Dropout(dropout_rate)
         self.proj = nn.Linear(adim, odim)
 
     def forward(self, xs_pad, ilens):
