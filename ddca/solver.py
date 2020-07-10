@@ -22,7 +22,8 @@ def ortho_reg_Y(Y, src_mask):
     Y = Y - Y_mean
 
     cov = torch.mm(torch.mul(Y, mask_float).t(), Y) / torch.sum(mask_float)
-    return torch.sum(((cov - I) ** 2)*(ones - I)), cov
+    return torch.sum((cov - I) ** 2), cov
+    # return torch.sum(((cov - I) ** 2) * (ones - I)), cov
 
 
 def ortho_reg_fn(V, ortho_lambda=1.):

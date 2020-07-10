@@ -104,7 +104,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
                            help='Number of time masks')
 
         # Covariance regularization.
-        group.add_argument('--block_toeplitz', default=True, type=strtobool,
+        group.add_argument('--block_toeplitz', default=False, type=strtobool,
                            help='Whether to Toeplitzify the covariance matrix')
         group.add_argument('--cov_diag_reg', default=1e-6, type=float,
                            help='Constants added to the diagonal of covariance matrix')
@@ -410,8 +410,8 @@ def fit_ddca(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu
             optimizer.zero_grad()
             if model.recon_lambda > 0 and model.masked_recon:
                 # Weiran: move these steps into a separate function.
-                masks_in = [spectral_masking(torch.ones_like(x), F=model.spec_mask_F, T=model.spec_mask_T,
-                    num_freq_masks=model.num_freq_masks, num_time_masks=model.num_time_masks).numpy() for x in x_batch_list]
+                masks_in = [spectral_masking(torch.ones(X_train[_].shape), F=model.spec_mask_F, T=model.spec_mask_T,
+                    num_freq_masks=model.num_freq_masks, num_time_masks=model.num_time_masks).numpy() for _ in idx_batch]
                 masks_out = [1.0 -m for m in masks_in]
                 masks_in = [_context_concat(m, input_context) for m in masks_in]
                 masks_out = [_context_concat(m, input_context) for m in masks_out]
