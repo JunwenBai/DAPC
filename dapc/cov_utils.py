@@ -3,33 +3,12 @@ import torch
 import scipy as sp
 import pdb
 
-"""
-def torch_toeplitzify(cov, T, d, symmetrize=True):
-    cov_toep = torch.zeros(T * d, T * d, device=cov.device)
-    for delta_t in range(T):
-        to_avg_lower = torch.zeros(T - delta_t, d, d)
-        to_avg_upper = torch.zeros(T - delta_t, d, d)
-        for i in range(T - delta_t):
-            to_avg_lower[i] = cov[(delta_t + i) * d:(delta_t + i + 1) * d, i * d:(i + 1) * d]
-            to_avg_upper[i] = cov[i * d:(i + 1) * d, (delta_t + i) * d:(delta_t + i + 1) * d]
-        avg_lower = torch.mean(to_avg_lower, axis=0)
-        avg_upper = torch.mean(to_avg_upper, axis=0)
-        if symmetrize:
-            avg_lower = 0.5 * (avg_lower + avg_upper.T)
-            avg_upper = avg_lower.T
-        for i in range(T - delta_t):
-            cov_toep[(delta_t + i) * d:(delta_t + i + 1) * d, i * d:(i + 1) * d] = avg_lower
-            cov_toep[i * d:(i + 1) * d, (delta_t + i) * d:(delta_t + i + 1) * d] = avg_upper
-    return cov_toep
-"""
-
-
 def matrix_toeplitzify(cov, T, d):
     """
-    # Weiran: I tested that the two functions are equivalent, with following tests.
+    # I tested that the two functions are equivalent, with following tests.
 
     import torch
-    from ddca.cov_utils import torch_toeplitzify, matrix_toeplitzify
+    from dapc.cov_utils import torch_toeplitzify, matrix_toeplitzify
     X=torch.FloatTensor(100, 10).uniform_(0, 1)
     cov=torch.mm(X.t(), X)/100
     # cov=torch.FloatTensor(10, 10).uniform_(0, 1)
@@ -134,18 +113,12 @@ def calc_cov_from_data(xs_pad, src_mask, T, toeplitzify=True, reg=0.0):
     B = xs_pad.size(0)
     maxlen = xs_pad.size(1)
     d = xs_pad.size(2)
+    T = int(T)
 
     if torch.min(src_mask.sum(1)) <= T:
         raise ValueError('T must be shorter than the length of the shortest ' +
                          'time series. If you are using the DCA model, 2 * DCA.T must be ' +
                          'shorter than the shortest time series.')
-
-    """
-    # Weiran: since we are going to remove mean later, this step is omitted.
-    mask_float = src_mask.float().flatten().unsqueeze(1)
-    mean = torch.sum(torch.mul(xs_pad.view([B*maxlen, d]), mask_float), 0, keepdim=True) / torch.sum(mask_float)
-    xs_pad = xs_pad - mean.unsqueeze(0)
-    """
 
     # Extracts sliding local blocks.
     xs_with_lags = xs_pad.view([B, maxlen*d]).unfold(1, T*d, d)
@@ -161,7 +134,6 @@ def calc_cov_from_data(xs_pad, src_mask, T, toeplitzify=True, reg=0.0):
     if toeplitzify:
         cov_est = matrix_toeplitzify(cov_est, T, d)
 
-    # rectify_spectrum(cov_est, verbose=False)
     if reg>0:
         cov_est = cov_est + reg * torch.eye(T*d, T*d, device=cov_est.device)
 

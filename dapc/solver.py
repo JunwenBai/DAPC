@@ -11,7 +11,6 @@ import logging
 
 
 def ortho_reg_Y(Y, src_mask):
-    # Weiran: Y is of shape (B, maxlen, fdim).
     fdim = Y.size(2)
     I = torch.eye(fdim, device=Y.device, dtype=Y.dtype)
     ones = torch.ones_like(I)
@@ -23,7 +22,6 @@ def ortho_reg_Y(Y, src_mask):
 
     cov = torch.mm(torch.mul(Y, mask_float).t(), Y) / torch.sum(mask_float)
     return torch.sum((cov - I) ** 2), cov
-    # return torch.sum(((cov - I) ** 2) * (ones - I)), cov
 
 
 def ortho_reg_fn(V, ortho_lambda=1.):
@@ -166,8 +164,6 @@ class RNN(torch.nn.Module):
         projected = self.l_last(ys_pad.contiguous().view(-1, ys_pad.size(2)))
         xs_pad = projected.view(ys_pad.size(0), ys_pad.size(1), -1)
         return xs_pad, ilens
-        # Weiran: not returning states.
-        # return xs_pad, ilens, states  # x: utt list of frame x dim
 
 
 def reset_backward_rnn_state(states):

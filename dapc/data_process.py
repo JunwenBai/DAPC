@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
-from ddca.solver import LIN, DNN
+from dapc.solver import LIN, DNN
 
 def smoothen(raw_xs, window_len=12, window='hamming'):
     xs = raw_xs.T

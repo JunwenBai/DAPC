@@ -152,8 +152,7 @@ def plot_3d(X, color="black", linewidth=2, ax=None):
     ax.plot(X[:, 0], X[:, 1], X[:, 2], c=color, linewidth=linewidth)
 
 
-def plot_lorenz_3d(ax, X, linewidth):
-    ax_label_fontsize = style.axis_label_fontsize
+def plot_lorenz_3d(ax, X, linewidth, ax_label_fontsize=style.axis_label_fontsize):
     plot_3d(X, ax=ax, linewidth=linewidth)
     ax.xaxis.set_pane_color((1, 1, 1, 0))
     ax.yaxis.set_pane_color((1, 1, 1, 0))
@@ -167,7 +166,7 @@ def plot_lorenz_3d(ax, X, linewidth):
     ax.dist = 9
 
 
-def plot_traces(ax, X, N_to_show, linewidth):
+def plot_traces(ax, X, N_to_show, linewidth, fontsize=style.ticklabel_fontsize):
     y_spacing = 1.5  # spacing between adjacent traces on the y-axis (in data units)
     y_jump = 3  # empty y-space for elipsis
     # plot traces
@@ -175,8 +174,8 @@ def plot_traces(ax, X, N_to_show, linewidth):
     offset_vals = [max_y - y_spacing * i for i in range(N_to_show)] + [0]
     t = np.arange(len(X)) * 0.025
     for i in range(N_to_show):
-        ax.plot(t, X[:len(t), i] + offset_vals[i], c="black", linewidth=linewidth)
-    ax.plot(t, X[:len(t), N_to_show], c="black", linewidth=linewidth)
+        ax.plot(t, X[:len(t), i]*0.5 + offset_vals[i], c="black", linewidth=linewidth)
+    ax.plot(t, X[:len(t), N_to_show]*0.5, c="black", linewidth=linewidth)
     # configure the axis
     ax.set_xlim(np.min(t), np.max(t))
     ax.spines['right'].set_visible(False)
@@ -185,9 +184,9 @@ def plot_traces(ax, X, N_to_show, linewidth):
     ax.set_xticks([])
     ax.set_yticks(offset_vals)
     ax.set_yticklabels(list(np.arange(N_to_show) + 1) + [X.shape[1]],
-                       fontsize=style.ticklabel_fontsize)
+                       fontsize=fontsize)
     ax.text(np.mean(t), y_jump * 0.55,
-            "···", rotation=90, fontsize=10, color="black",
+            "···", rotation=90, fontsize=fontsize, color="black",
             horizontalalignment="center", verticalalignment="center",
             fontweight="normal")
 
@@ -730,10 +729,12 @@ def plot_dca_autocorr_fns(ax, ax_inset, autocorr_1, autocorr_2):
                   frameon=False, ncol=1, labelspacing=0.1, columnspacing=0.6,
                   bbox_to_anchor=(0.05, 0.175, 1, 1))
 
-def plot_figs(dca_recons, ddca_recons, X_dyn_val, X_clean_val, X_noisy_val, r2_vals, snr_vals,
-              label1="DCA", label2="d-DCA", fig_name="figs/fig1.pdf"):
-    #Create axes
-    dca_recons, ddca_recons, snr_vals = np.array(dca_recons), np.array(ddca_recons), np.array(snr_vals)
+def plot_figs(dca_recons, dapc_recons, X_dyn_val, X_clean_val, X_noisy_val, r2_vals, snr_vals,
+              label1="DCA", label2="d-DCA", fig_path="figs/fig1.pdf"):
+    np.savez(fig_path+"/results.npz", dca_recons=dca_recons, dapc_recons=dapc_recons, X_dyn_val=X_dyn_val, X_clean_val=X_clean_val, X_noisy_val=X_noisy_val, r2_vals=r2_vals, snr_vals=snr_vals)
+
+    dca_recons, dapc_recons, snr_vals = np.array(dca_recons), np.array(dapc_recons), np.array(snr_vals)
+
     axes, txt_cords = lorenz_fig_axes(fig_width=6.6,
                                       wpad_edge=0.01, wpad_mid=0.06,
                                       left_ax_width=0.125, left_ax_wpad=0.025,
@@ -749,7 +750,7 @@ def plot_figs(dca_recons, ddca_recons, X_dyn_val, X_clean_val, X_noisy_val, r2_v
     past_color = "0.85"
     future_color = "0.65"
     dca_color = "#CF2F25"
-    ddca_color = "black"
+    dapc_color = "black"
 
     T_to_show_2d = 150
     T_to_show_3d = 500
@@ -766,34 +767,99 @@ def plot_figs(dca_recons, ddca_recons, X_dyn_val, X_clean_val, X_noisy_val, r2_v
 
     #ax4 and ax5: Plots of projections (DCA and dDCA)
     #get a random projection of X_noisy and transorm for Lorenz comparison
-    plot_dca_demo(ax4, ax5, ax6, dca_recons[X_display_idx, :T_to_show_2d], ddca_recons[X_display_idx, :T_to_show_2d], X_dyn_val[:T_to_show_2d],
+    plot_dca_demo(ax4, ax5, ax6, dca_recons[X_display_idx, :T_to_show_2d], dapc_recons[X_display_idx, :T_to_show_2d], X_dyn_val[:T_to_show_2d],
                   past_color=past_color, future_color=future_color, linewidth=linewidth_2d, label1=label1, label2=label2)
 
     #Plot Lorenz panels (Qualitative results of 3d projection)
     dca_axes = [ax7, ax9, ax11]
-    ddca_axes = [ax8, ax10, ax12]
-    #plt_snr_vals = [0.1, 1.0, 10.0]
-    #plt_snr_strs = ["$10^{-1}$", "$10^{0}$", "$10^{1}$"]
-    plt_snr_vals = [10.0]
-    plt_snr_strs = ["$10^{1}$"]
+    dapc_axes = [ax8, ax10, ax12]
+    plt_snr_vals = snr_vals
+    plt_snr_strs = [str(r) for r in snr_vals]
+
     plt_idx = [np.argmin((snr_vals-snr)**2) for snr in plt_snr_vals]
-    for i in range(len(plt_snr_vals)):
+    for i in range(min(len(plt_snr_vals), 3)):
         plot_3d(dca_recons[plt_idx[i], :T_to_show_3d], ax=dca_axes[i], color=dca_color, linewidth=linewidth_3d)
-        plot_3d(ddca_recons[plt_idx[i], :T_to_show_3d], ax=ddca_axes[i], color=ddca_color, linewidth=linewidth_3d)
+        plot_3d(dapc_recons[plt_idx[i], :T_to_show_3d], ax=dapc_axes[i], color=dapc_color, linewidth=linewidth_3d)
         dca_axes[i].set_title("SNR = " + plt_snr_strs[i], pad=5, fontsize=fontsize)
-    for ax in dca_axes + ddca_axes:
+    
+    for ax in dca_axes + dapc_axes:
         ax.set_axis_off()
         ax.dist = 7.5
     plt.gcf().text(txt_cords[0][0], txt_cords[0][1], label1, va="center", ha="center", fontsize=fontsize, color=dca_color)
-    plt.gcf().text(txt_cords[1][0], txt_cords[1][1], label2, va="center", ha="center", fontsize=fontsize, color=ddca_color)
+    plt.gcf().text(txt_cords[1][0], txt_cords[1][1], label2, va="center", ha="center", fontsize=fontsize, color=dapc_color)
 
     #Finally, the R2 vs SNR plot
-    plot_r2(ax13, snr_vals, plt_snr_vals, r2_vals, dca_color, ddca_color, label1, label2)
+    plot_r2(ax13, snr_vals, plt_snr_vals, r2_vals, dca_color, dapc_color, label1, label2)
 
     #Left cov plots
     left_ax_1.set_zorder(1000)
-    plot_cov(left_ax_1, sig_var=1, noise_var=5, noise_sig_labels=True, noise_color=noise_color, sig_color=sig_color, pca_color=ddca_color, dca_color=dca_color)
-    plot_cov(left_ax_2, sig_var=5, noise_var=5, noise_sig_labels=False, noise_color=noise_color, sig_color=sig_color, pca_color=ddca_color, dca_color=dca_color)
-    plot_cov(left_ax_3, sig_var=5, noise_var=1, noise_sig_labels=False, noise_color=noise_color, sig_color=sig_color, pca_color=ddca_color, dca_color=dca_color)
+    plot_cov(left_ax_1, sig_var=1, noise_var=5, noise_sig_labels=True, noise_color=noise_color, sig_color=sig_color, pca_color=dapc_color, dca_color=dca_color)
+    plot_cov(left_ax_2, sig_var=5, noise_var=5, noise_sig_labels=False, noise_color=noise_color, sig_color=sig_color, pca_color=dapc_color, dca_color=dca_color)
+    plot_cov(left_ax_3, sig_var=5, noise_var=1, noise_sig_labels=False, noise_color=noise_color, sig_color=sig_color, pca_color=dapc_color, dca_color=dca_color)
 
-    plt.savefig(fig_name)
+    plt.savefig(fig_path+"/overall.pdf")
+    plt.clf()
+
+    fig = plt.figure()
+    ax1 = fig.add_subplot(111, projection="3d")
+    plot_lorenz_3d(ax1, X_dyn_val[:T_to_show_3d], linewidth_3d+2.25, 35)
+    for axis in [ax1.w_xaxis, ax1.w_yaxis, ax1.w_zaxis]:
+        axis.line.set_linewidth(3)
+    plt.tight_layout()
+    plt.savefig(fig_path+"/1.pdf")
+    plt.clf()
+
+    N_to_show = 5 #number of channels to plot (also plot last one)
+    fig = plt.figure()
+    ax2 = fig.add_subplot(111)
+    plot_traces(ax2, X_clean_val[:T_to_show_2d], N_to_show, linewidth_2d+2.25, 30)
+    plt.setp(ax2.spines.values(), linewidth=3)
+    plt.tight_layout()
+    plt.savefig(fig_path+"/2.pdf")
+    plt.clf()
+    
+    N_to_show = 5 #number of channels to plot (also plot last one)
+    ax3 = fig.add_subplot(111)
+    plot_traces(ax3, X_noisy_val[:T_to_show_2d], N_to_show, linewidth_2d+2.25, 30)
+    plt.setp(ax3.spines.values(), linewidth=3)
+    plt.tight_layout()
+    plt.savefig(fig_path+"/3.pdf")
+    plt.clf()
+
+    for i in range(len(plt_snr_vals)):
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection="3d")
+        plot_3d(dca_recons[plt_idx[i], :T_to_show_3d], ax=ax, color=dapc_color, linewidth=linewidth_3d+2.25)
+        ax.set_axis_off()
+        ax.dist = 7.5
+        plt.tight_layout()
+        plt.savefig(fig_path+"/{}_{}.pdf".format(plt_snr_vals[i], 4))
+        plt.clf()
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection="3d")
+        plot_lorenz_3d(ax, dca_recons[plt_idx[i], :T_to_show_3d], linewidth_3d+2.25, 35)
+        for axis in [ax.w_xaxis, ax.w_yaxis, ax.w_zaxis]:
+            axis.line.set_linewidth(3)
+        plt.tight_layout()
+        plt.savefig(fig_path+"/{}_{}_xyz.pdf".format(plt_snr_vals[i], 4))
+        plt.clf()
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection="3d")
+        plot_3d(dapc_recons[plt_idx[i], :T_to_show_3d], ax=ax, color=dapc_color, linewidth=linewidth_3d+2.25)
+        ax.set_axis_off()
+        ax.dist = 7.5
+        plt.tight_layout()
+        plt.savefig(fig_path+"/{}_{}.pdf".format(plt_snr_vals[i], 5))
+        plt.clf()
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection="3d")
+        plot_lorenz_3d(ax, dapc_recons[plt_idx[i], :T_to_show_3d], linewidth_3d+2.25, 35)
+        for axis in [ax.w_xaxis, ax.w_yaxis, ax.w_zaxis]:
+            axis.line.set_linewidth(3)
+        plt.tight_layout()
+        plt.savefig(fig_path+"/{}_{}_xyz.pdf".format(plt_snr_vals[i], 5))
+        plt.clf()
+

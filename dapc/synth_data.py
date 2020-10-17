@@ -307,13 +307,8 @@ def gen_noise_cov(N, D, var, rng, V_noise=None):
 
 def random_basis(N, D, rng):
     return scipy.stats.ortho_group.rvs(N, random_state=rng)[:, :D]
-    #return scipy.stats.ortho_group.rvs(N, random_state=rng)[:D, :].T
 
 def median_subspace(N, D, rng, num_samples=5000, V_0=None):
-    #print("N:", N)
-    #print("D:", D)
-    #print("num_samples:", num_samples)
-    #print("V_0:", V_0.shape)
     subspaces = np.zeros((num_samples, N, D)) # 5000*30*7
     angles = np.zeros((num_samples, min(D, V_0.shape[1]))) # 5000*3
     if V_0 is None:
@@ -321,15 +316,11 @@ def median_subspace(N, D, rng, num_samples=5000, V_0=None):
     for i in range(num_samples):
         subspaces[i] = random_basis(N, D, rng)
         angles[i] = np.rad2deg(scipy.linalg.subspace_angles(V_0, subspaces[i]))
-        #print("V_0:", V_0.shape)
-        #print("subsp:", subspaces[i].shape)
-        #print("angles:", angles[i].shape)
+    
     median_angles = np.median(angles, axis=0)
     median_subspace_idx = np.argmin(np.sum((angles - median_angles)**2, axis=1))
     median_subspace = subspaces[median_subspace_idx]
-    #print("median_angles:", median_angles.shape)
-    #print("median_subsp_idx:", median_subspace_idx)
-    #print("median_subspace:", median_subspace.shape)
+    
     return median_subspace # 30*7
 
 def embedded_lorenz_cross_cov_mats(N, T, snr=1., noise_dim=7, return_samples=False,
@@ -413,8 +404,6 @@ def nl_embedded_lorenz_cross_cov_mats(N, T, snr=1., noise_dim=7, return_samples=
     X = model(torch.Tensor(X_dynamics)).detach().numpy()
     X_var = np.max(scipy.linalg.eigvalsh(np.cov(X.T)))
     X *= np.sqrt(dynamics_var/X_var)
-    #print("var1:", np.max(scipy.linalg.eigvalsh(np.cov(X_dynamics.T))))
-    #print("var2:", np.max(scipy.linalg.eigvalsh(np.cov(X.T))))
 
     noise_var = dynamics_var / snr
     # Generate dynamics embedding matrix (will remain fixed)
@@ -437,9 +426,6 @@ def nl_embedded_lorenz_cross_cov_mats(N, T, snr=1., noise_dim=7, return_samples=
         # Add noise covariance
         noise_cov = gen_noise_cov(N, noise_dim, noise_var, rng, V_noise=V_noise)
     # Generate actual samples of high-D data
-    '''cross_cov_mats = calc_cross_cov_mats_from_data(X_dynamics, T)
-    cross_cov_mats = np.array([V_dynamics.dot(C).dot(V_dynamics.T) for C in cross_cov_mats])
-    cross_cov_mats[0] += noise_cov'''
     if return_samples:
         X_samples = X + rng.multivariate_normal(mean=np.zeros(N), cov=noise_cov, size=len(X_dynamics))
         return None, X_samples

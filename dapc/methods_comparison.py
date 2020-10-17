@@ -11,7 +11,7 @@ from functools import partial
 import torch
 from torch.nn import functional as F
 
-from .ddca import ortho_reg_fn
+from .dapc import ortho_reg_fn
 
 __all__ = ['GaussianProcessFactorAnalysis',
            'SlowFeatureAnalysis',

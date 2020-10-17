@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 
+import random
+import torch
+
 def spectral_masking(spec, F=30, T=40, num_freq_masks=2, num_time_masks=2):
     # Weiran: I am removing the warping part which is costly.
     # And replace with zero is needed for multiplicative masks to work.
@@ -34,10 +37,6 @@ LIABILITY, WHETjjHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
-
-import random
-
-import torch
 
 
 def specaug(spec, W=5, F=30, T=40, num_freq_masks=2, num_time_masks=2, replace_with_zero=False):

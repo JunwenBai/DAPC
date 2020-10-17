@@ -3,10 +3,13 @@ from sklearn.linear_model import LinearRegression as LR
 from sklearn.decomposition import PCA
 from scipy.stats import special_ortho_group as sog
 
-from .cov_util import calc_cross_cov_mats_from_data
+from .cov_utils import calc_cov_from_data
 from .data_util import CrossValidate, form_lag_matrix
 from .methods_comparison import SlowFeatureAnalysis as SFA
-from .dca import DynamicalComponentsAnalysis
+from .dapc import DynamicalComponentsAnalysis, fit_dapc
+from .data_process import match, split, chunk_long_seq, smoothen
+import torch
+from torch.utils.tensorboard import SummaryWriter
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -42,22 +45,8 @@ def linear_decode_r2(X_train, Y_train, X_test, Y_test, decoding_window=1, offset
     if isinstance(Y_test, np.ndarray) and Y_test.ndim == 2:
         Y_test = [Y_test]
 
-    '''print("X_train:", X_train.shape) # (53806, 5)
-    print("Y_train:", Y_train.shape) # (53806, 2)
-    print("X_test:", X_test.shape) # (13452, 5)
-    print("Y_test:", Y_test.shape) # (13452, 2)
-    print("decoding_win:", decoding_window) # 3
-    print("offset:", offset) # 0'''
-
     X_train_lags = [form_lag_matrix(Xi, decoding_window) for Xi in X_train]
     X_test_lags = [form_lag_matrix(Xi, decoding_window) for Xi in X_test]
-    '''print(X_train[0].shape)
-    print(X_train[0][:10, :])
-    print(X_train_lags[0].shape)
-    print(X_train_lags[0][:5, :])'''
-    #for i, (x, y) in enumerate(zip(X_train[0], Y_train[0])):
-    #    print(x, y)
-    #    if i > 5: break
 
     Y_train = [Yi[decoding_window // 2:] for Yi in Y_train]
     Y_train = [Yi[:len(Xi)] for Yi, Xi in zip(Y_train, X_train_lags)]
@@ -65,10 +54,6 @@ def linear_decode_r2(X_train, Y_train, X_test, Y_test, decoding_window=1, offset
         Y_train = [Yi[offset:] for Yi in Y_train]
     else:
         Y_train = [Yi[:Yi.shape[0] + offset] for Yi in Y_train]
-    #for i, (x, y) in enumerate(zip(X_train_lags[0], Y_train[0])):
-    #    print(x, y)
-    #    if i > 5: break
-    #print("offset:", offset)
 
     Y_test = [Yi[decoding_window // 2:] for Yi in Y_test]
     Y_test = [Yi[:len(Xi)] for Yi, Xi in zip(Y_test, X_test_lags)]
@@ -104,40 +89,28 @@ def linear_decode_r2(X_train, Y_train, X_test, Y_test, decoding_window=1, offset
     else:
         Y_test = np.concatenate(Y_test)
 
-    for i, (x, y) in enumerate(zip(X_train_lags, Y_train)):
-        print(x, y)
-        if i > 5: break
-    exit()
-
     model = LR().fit(X_train_lags, Y_train)
     r2 = model.score(X_test_lags, Y_test)
     return r2
 
 
-def run_analysis(X, Y, T_pi_vals, dim_vals, offset_vals, num_cv_folds, decoding_window,
+def run_analysis(X, Y, T_pi_vals, dim_vals, offset_vals, num_cv_folds, decoding_window, args,
                  n_init=1, verbose=False):
 
-    '''print("X:", X.shape)
-    print("Y:", Y.shape)
-    print("num_cv_folds:", num_cv_folds)
-    print("dim_vals:", dim_vals)
-    print("offset_vals:", offset_vals)
-    print("T_pi_vals:", T_pi_vals)'''
+    # X: 1363 * 30
+    # Y: 1363 * 30
+    use_gpu = True
+    device = torch.device("cuda:0")
 
     results_size = (num_cv_folds, len(dim_vals), len(offset_vals), len(T_pi_vals) + 2)
-    results = np.zeros(results_size)
+    results = np.zeros(results_size) # 5*4*4*12
     min_std = 1e-6
     good_cols = (X.std(axis=0) > min_std)
-    #print("good_cols:", good_cols)
     X = X[:, good_cols]
     # loop over CV folds
     cv = CrossValidate(X, Y, num_cv_folds, stack=False)
     for X_train, X_test, Y_train, Y_test, fold_idx in cv:
-        '''print("X_train:", np.array(X_train).shape)
-        print("X_test:", np.array(X_test).shape)
-        print("Y_train:", np.array(Y_train).shape)
-        print("Y_test:", np.array(Y_test).shape)
-        print("fold_idx:", fold_idx)'''
+        if fold_idx: break
         if verbose:
             print("fold", fold_idx + 1, "of", num_cv_folds)
 
@@ -149,18 +122,13 @@ def run_analysis(X, Y, T_pi_vals, dim_vals, offset_vals, num_cv_folds, decoding_
         Y_train_ctd = [Yi - Y_mean for Yi in Y_train]
         Y_test_ctd = Y_test - Y_mean
 
+        # chunk
+        chunk_size = 500
+        X_train_seqs, L_train = chunk_long_seq(X_train_ctd[0], 30, chunk_size)
+        X_test_seqs, L_test = [X_test_ctd], [X_test_ctd.shape[0]]
+
         # compute cross-cov mats for DCA
         T_max = 2 * np.max(T_pi_vals)
-        cross_cov_mats = calc_cross_cov_mats_from_data(X_train_ctd, T_max)
-        #print("T_max:", T_max)
-        #print("cross_cov_mats:", cross_cov_mats.shape)
-
-        # do PCA/SFA
-        pca_model = PCA(svd_solver='full').fit(np.concatenate(X_train_ctd))
-        sfa_model = SFA(1).fit(X_train_ctd)
-
-        # make DCA object
-        opt = DynamicalComponentsAnalysis(d=1, T=1)
 
         # loop over dimensionalities
         for dim_idx in range(len(dim_vals)):
@@ -168,41 +136,32 @@ def run_analysis(X, Y, T_pi_vals, dim_vals, offset_vals, num_cv_folds, decoding_
             if verbose:
                 print("dim", dim_idx + 1, "of", len(dim_vals))
 
-            # compute PCA/SFA R2 vals
-            X_train_pca = [np.dot(Xi, pca_model.components_[:dim].T) for Xi in X_train_ctd]
-            X_test_pca = np.dot(X_test_ctd, pca_model.components_[:dim].T)
-            X_train_sfa = [np.dot(Xi, sfa_model.all_coef_[:, :dim]) for Xi in X_train_ctd]
-            X_test_sfa = np.dot(X_test_ctd, sfa_model.all_coef_[:, :dim])
-            '''print("X_train_pca:", X_train_pca[0].shape)
-            print("X_test_pca:", X_test_pca.shape)
-            print("X_train_sfa:", X_train_sfa[0].shape)
-            print("X_test_sfa:", X_test_sfa.shape)
-            print("pca_model.components_:", pca_model.components_.shape)
-            print("sfa_model.all_coef_:", sfa_model.all_coef_.shape)'''
-            for offset_idx in range(len(offset_vals)):
-                offset = offset_vals[offset_idx]
-                r2_pca = linear_decode_r2(X_train_pca, Y_train_ctd, X_test_pca, Y_test_ctd,
-                                          decoding_window=decoding_window, offset=offset)
-                r2_sfa = linear_decode_r2(X_train_sfa, Y_train_ctd, X_test_sfa, Y_test_ctd,
-                                          decoding_window=decoding_window, offset=offset)
-                results[fold_idx, dim_idx, offset_idx, 0] = r2_pca
-                results[fold_idx, dim_idx, offset_idx, 1] = r2_sfa
-
             # loop over T_pi vals
             for T_pi_idx in range(len(T_pi_vals)):
                 T_pi = T_pi_vals[T_pi_idx]
-                opt.cross_covs = cross_cov_mats[:2 * T_pi]
-                opt.fit_projection(d=dim, n_init=n_init)
-                V_dca = opt.coef_
+
+                idim = X_test_ctd.shape[-1]
+                fdim = dim
+                T = T_pi
+                params = 'obj={}_encoder={}_fdim={}_context={}_T={}_lr={}_bs={}_dropout={}_rate-lambda={}_ortho-lambda={}_recon-lambda={}_seed={}'.format(
+                    args.obj, args.encoder_type, args.fdim, args.input_context, args.T, args.lr, args.batchsize, args.dropout, args.rate_lambda, args.ortho_lambda, args.recon_lambda, args.seed)
+
+                dapc_model = DynamicalComponentsAnalysis(args.obj, idim, fdim, T, encoder_type=args.encoder_type,
+                                                 ortho_lambda=args.ortho_lambda, recon_lambda=args.recon_lambda,
+                                                 dropout=args.dropout, masked_recon=args.masked_recon,
+                                                 args=args, device=device)
+
+                dapc_model = fit_dapc(dapc_model, X_train_seqs, L_train, X_test_seqs, L_test, None, args.lr, use_gpu,
+                                batch_size=args.batchsize, max_epochs=args.epochs, device=device, snapshot=params + ".cpt", use_writer=False)
 
                 # compute DCA R2 over offsets
-                X_train_dca = [np.dot(Xi, V_dca) for Xi in X_train_ctd]
-                X_test_dca = np.dot(X_test_ctd, V_dca)
+                X_train_dca = dapc_model.encode(X_train_ctd[0].to(device, dtype=dapc_model.dtype)).cpu().numpy()
+                X_test_dca = dapc_model.encode(X_test_ctd).to(device, dtype=dapc_model.dtype).cpu().numpy()
                 for offset_idx in range(len(offset_vals)):
                     offset = offset_vals[offset_idx]
                     r2_dca = linear_decode_r2(X_train_dca, Y_train_ctd, X_test_dca, Y_test_ctd,
                                               decoding_window=decoding_window, offset=offset)
-                    results[fold_idx, dim_idx, offset_idx, T_pi_idx + 2] = r2_dca
+                    results[fold_idx, dim_idx, offset_idx, T_pi_idx] = r2_dca
     return results
 
 
@@ -237,6 +196,7 @@ def random_complement(proj, size=1, random_state=None):
     comp_vec = np.zeros((dim, size))
     for ii in range(size):
         comp_vec[:, ii] = proj_full_comp[:, pdim:].dot(rots[ii])[:, -1]
+
     return comp_vec
 
 
