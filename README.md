@@ -1,21 +1,18 @@
 # Deep Autoencoding Predictive Components
 
-This code implements and analyses DAPC.
-
 ### Overview
 
 <div align=center><img src="figs/DAPC.png" style="width:500px"></div>
-
 Deep Autoencoding Predictive Components (**DAPC**) is a self-supervised representation learning method for sequence data, based on the intuition that useful representations of sequence data should exhibit a simple structure in the latent space. We encourage this latent structure by maximizing an estimate of *predictive information* of latent feature sequences, and regularize the learning through masked reconstruction. 
 
 This repository mainly demonstrates the Lorenz Attractor experiments. 
 
-<div align=center> 
-     <img src="figs/raw.png" alt="raw" style="width:23%">
-     <img src="figs/30d.png" alt="30d" style="width:23%">
-     <img src="figs/30d_noisy.png" alt="30d_noisy" style="width:23%">
-     <img src="figs/recovered.png" alt="recovered" style="width:23%">
-</div>
+<p float="middle">
+  <img src="figs/raw.png" width="23%" />
+  <img src="figs/30d.png" width="23%" /> 
+  <img src="figs/30d_noisy.png" width="23%" />
+  <img src="figs/recovered.png" width="23%" />
+</p>
 
 Leftmost:  ground-truth 3d signals. Middle left: lifted 30d signals. Middle right: noisy lifted 30d signals. Rightmost: unsupervised recovery of the 3d signals by DAPC.
 
