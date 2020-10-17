@@ -2,9 +2,7 @@
 
 ### Overview
 
-<p float="middle">
-  <img src="figs/DAPC.png" width="75%" />
-</p>
+<div align=center><img src="figs/DAPC.png" style="width:350px"></div>
 
 
 
@@ -62,6 +60,6 @@ Junwen Bai, Weiran Wang, Yingbo Zhou, Caiming Xiong
 
 ### References
 
-Clark, David, Jesse Livezey, and Kristofer Bouchard. "Unsupervised Discovery of Temporal Structure in Noisy Data with Dynamical Components Analysis." Advances in Neural Information Processing Systems. 2019.
+Clark, D., Livezey, J. and Bouchard, K.. Unsupervised discovery of temporal structure in noisy data with dynamical components analysis. In *Advances in Neural Information Processing Systems*, 2019.
 
 [DCA](https://github.com/BouchardLab/DynamicalComponentsAnalysis)
