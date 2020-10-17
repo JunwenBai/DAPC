@@ -2,7 +2,9 @@
 
 ### Overview
 
-<div align=center><img src="figs/DAPC.png" style="width:350px"></div>
+<p float="middle">
+  <img src="figs/DAPC.png" width="75%" />
+</p>
 
 
 
