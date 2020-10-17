@@ -29,15 +29,21 @@ Older versions might work as well.
 
 Download the repo
 
-`git clone https://github.com/JunwenBai/DAPC.git `
+```
+git clone https://github.com/JunwenBai/DAPC.git
+```
 
 To run the deterministic DAPC
 
-`./run_ddapc.sh <gpuid>`
+```
+./run_ddapc.sh <gpuid>
+```
 
 To run the probabilistic DAPC
 
-`./run_vdapc.sh <gpuid>`
+```
+./run_vdapc.sh <gpuid>
+```
 
 `<gpuid>` is the gpu id of your machine. One can inspect the bashes to see all the options for training. 
 
