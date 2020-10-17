@@ -84,7 +84,7 @@ def main(args):
     idim = 30 # lift projection dim
     noise_dim = 7 # noisify raw DCA
     split_rate = args.split_rate # train/valid split
-    snr_vals = [5.0]  # signal-to-noise ratios
+    snr_vals = [0.3, 1.0, 5.0]  # signal-to-noise ratios
     num_samples = 10000  # samples to collect from the lorenz system
 
     print("Generating ground truth dynamics ...")
@@ -135,7 +135,7 @@ def main(args):
                                                     dropout=0.0, masked_recon=False,
                                                     args=args)
         dca_model = fit_dapc(dca_model, X_train_seqs, L_train, X_valid_seqs[:1], L_valid[:1], writer, args.lr, use_gpu,
-                             batch_size=args.batchsize, max_epochs=1, device=device, snapshot="lin_dapc.cpt", X_match=X_match, Y_match=Y_match, use_writer=False)
+                             batch_size=args.batchsize, max_epochs=args.epochs, device=device, snapshot="lin_dapc.cpt", X_match=X_match, Y_match=Y_match, use_writer=False)
 
         X_dca = dca_model.encode(
             torch.from_numpy(_context_concat(X_noisy_val[:500], dca_model.input_context)).float().to(device,
