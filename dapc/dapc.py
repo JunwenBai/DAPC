@@ -12,12 +12,12 @@ from .solver import LIN, DNN, RNN, TRANSFORMER, ortho_reg_fn, ortho_reg_Y
 from .cov_utils import calc_cov_from_data, calc_pi_from_cov, matrix_toeplitzify
 from .utils import make_non_pad_mask, pad_list, _context_concat, gen_batch_indices
 from .spec_augment import spectral_masking
-from .vae import vdca_loss
+from .vae import vdapc_loss
 from distutils.util import strtobool
 import pdb
 from .data_process import match
 
-class DynamicalComponentsAnalysis(torch.nn.Module):
+class DAPC(torch.nn.Module):
     """Dynamical Components Analysis.
 
     Runs DCA on multidimensional time series data X to discover a projection
@@ -45,7 +45,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
     @staticmethod
     def add_arguments(parser):
         """Add arguments."""
-        group = parser.add_argument_group("DynamicalComponentsAnalysis model setting")
+        group = parser.add_argument_group("DAPC model setting")
 
         # Weiran: transformer-related.
         group.add_argument("--transformer-init", type=str, default="pytorch",
@@ -132,7 +132,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
 
     def __init__(self, obj, idim, fdim, T, encoder_type, ortho_lambda, recon_lambda, dropout,
             masked_recon, args, dtype=torch.float32, device="cuda:0"):
-        super(DynamicalComponentsAnalysis, self).__init__()
+        super(DAPC, self).__init__()
 
         # Objective for representation learning.
         self.obj = obj
@@ -347,7 +347,7 @@ class DynamicalComponentsAnalysis(torch.nn.Module):
             # Since pi and ortho_loss do not make sense for CPC.
             key_loss = self.cpc_latent(xs_pad, hs_pad, ilens)
         elif self.obj == "vae":
-            rate_loss = vdca_loss((mu, logvar), hs_pad, hmask, self.T, self.cov, self.vae_posterior_L,
+            rate_loss = vdapc_loss((mu, logvar), hs_pad, hmask, self.T, self.cov, self.vae_posterior_L,
                                     alpha=self.vae_alpha, beta=self.vae_beta, gamma=self.vae_gamma, zeta=self.vae_zeta)
             key_loss = -pi + self.rate_lambda * rate_loss
         else:

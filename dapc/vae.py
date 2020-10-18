@@ -7,7 +7,7 @@ from .math import log_density_gaussian, log_importance_weight_matrix, matrix_log
 import pdb
 
 
-def vdca_loss(latent_dist, latent_sample, latent_mask, T, cov, post_L, alpha=0., beta=0., gamma=1., zeta=1.):
+def vdapc_loss(latent_dist, latent_sample, latent_mask, T, cov, post_L, alpha=0., beta=0., gamma=1., zeta=1.):
     batch_size, seq_len, d = latent_sample.shape
 
     ### Junwen: compute the log prob terms for each 3*3 block
