@@ -1,3 +1,6 @@
+# Copyright 2020 Salesforce Research (Junwen Bai, Weiran Wang)
+# Licensed under the Apache License, Version 2.0 (the "License")
+
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal as MVN
 from .math import log_density_gaussian, log_importance_weight_matrix, matrix_log_density_gaussian

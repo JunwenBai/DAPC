@@ -47,6 +47,8 @@ To run the probabilistic DAPC
 
 One can inspect the bashes to see all the options for training. By default, we use `gpu:0`.
 
+`transformer` folder mostly inherits from [ESPnet](https://github.com/espnet/espnet). Though the options are provided, we do not encourage one to use `transformer` in this small-scale problem.
+
 ### Paper
 
 If you are interested in our work, please consider cite the following paper:
@@ -62,6 +64,8 @@ If you are interested in our work, please consider cite the following paper:
 
 ### References
 
+[DCA](https://github.com/BouchardLab/DynamicalComponentsAnalysis)
+
 Clark, D., Livezey, J. and Bouchard, K.. Unsupervised discovery of temporal structure in noisy data with dynamical components analysis. In *Advances in Neural Information Processing Systems*, 2019.
 
-[DCA](https://github.com/BouchardLab/DynamicalComponentsAnalysis)
+Watanabe, S., Hori, T., Karita, S., Hayashi, T., Nishitoba, J., Unno, Y., Soplin, N.E.Y., Heymann, J., Wiesner, M., Chen, N. and Renduchintala, A.. ESPnet: End-to-End Speech Processing Toolkit. Proc. Interspeech, 2018.

@@ -1,3 +1,6 @@
+# Copyright 2020 Salesforce Research (Junwen Bai, Weiran Wang)
+# Licensed under the Apache License, Version 2.0 (the "License")
+
 import numpy as np
 import scipy
 import matplotlib.pyplot as plt

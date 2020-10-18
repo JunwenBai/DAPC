@@ -1,3 +1,6 @@
+# Copyright 2020 Salesforce Research (Junwen Bai, Weiran Wang)
+# Licensed under the Apache License, Version 2.0 (the "License")
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -45,15 +48,6 @@ def match(X, X_true, max_epochs=3000, device="cpu", verbose=1):  # use a linear 
         print("final:", loss.item())
         print("----------------")
     return match_model(X, None).detach().cpu().numpy(), loss.item()
-
-
-def plot_3d_sig(X_dca, plt_idx=300, fig_name="X_dca.png"):  # plot 3-d signals in one figure
-    idxs = np.arange(plt_idx)
-    plt.plot(idxs, X_dca[:plt_idx, 0], color='b')
-    plt.plot(idxs, X_dca[:plt_idx, 1], color='r')
-    plt.plot(idxs, X_dca[:plt_idx, 2], color='g')
-    plt.savefig("figs/{}".format(fig_name))
-    plt.clf()
 
 
 def split(X, split_rate):
