@@ -3,7 +3,6 @@
 ### Overview
 
 <div align=center><img src="figs/DAPC.png" width="70%"></div>
-
 Deep Autoencoding Predictive Components (**DAPC**) is a self-supervised representation learning method for sequence data, based on the intuition that useful representations of sequence data should exhibit a simple structure in the latent space. We encourage this latent structure by maximizing an estimate of *predictive information* of latent feature sequences, and regularize the learning through masked reconstruction. 
 
 This repository mainly demonstrates the Lorenz Attractor experiments. 
@@ -37,24 +36,29 @@ git clone https://github.com/JunwenBai/DAPC.git
 To run the deterministic DAPC
 
 ```
-./run_ddapc.sh <gpuid>
+./run_ddapc.sh
 ```
 
 To run the probabilistic DAPC
 
 ```
-./run_vdapc.sh <gpuid>
+./run_vdapc.sh
 ```
 
-`<gpuid>` is the gpu id of your machine. One can inspect the bashes to see all the options for training. 
+One can inspect the bashes to see all the options for training. By default, we use `gpu:0`.
 
 ### Paper
 
-**Representation Learning for Sequence Data with Deep Autoencoding Predictive Components**
+If you are interested in our work, please consider cite the following paper:
 
-Junwen Bai, Weiran Wang, Yingbo Zhou, Caiming Xiong
-
-[arXiv:2010.03135](https://arxiv.org/abs/2010.03135)
+```bibtex
+@article{bai2020representation,
+  title={Representation Learning for Sequence Data with Deep Autoencoding Predictive Components},
+  author={Bai, Junwen and Wang, Weiran and Zhou, Yingbo and Xiong, Caiming},
+  journal={arXiv preprint arXiv:2010.03135},
+  year={2020}
+}
+```
 
 ### References
 
