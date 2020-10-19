@@ -24,7 +24,7 @@ def get_parser():
     parser.add_argument("--obj", default="det", type=str,
                         choices=["det", "cpc", "vae"],
                         help="objective function for representation learning, det (deterministic), cpc, or vae")
-    parser.add_argument("--dataset", default="HC", type=str, help="dataset")
+    parser.add_argument("--dataset", default="M1", type=str, help="dataset")
     parser.add_argument("--fdim", default=3, help="Dimensionality of features", type=int)
     parser.add_argument("--T", default=4, help="Time steps for estimating PI", type=int)
     parser.add_argument("--ortho_lambda", default=0.0, help="Regularization parameter for orthogonality", type=float)
@@ -48,7 +48,6 @@ def main(args):
 
     ### data
     M1 = data_util.load_sabes_data('data/neural/indy_20160627_01.mat')
-    HC = data_util.load_kording_paper_data('data/neural/example_data_hc.pickle')
 
     #### params
     T_pi_vals = np.arange(1, 11)
@@ -61,16 +60,7 @@ def main(args):
     n_init = 5
     ####
 
-    if args.dataset == "HC":
-        print("HC:", HC['neural'].shape, HC['loc'].shape) # inputs and targets
-        if not os.path.exists("results"):
-            os.mkdir("results")
-        res_name = "results/HC_{}_recon{}_ortho{}_{}.npy".format(args.obj, args.recon_lambda, args.ortho_lambda, args.epochs)
-
-        HC_results = analysis.run_analysis(HC['neural'], HC['loc'], T_pi_vals, dim_vals=dims, offset_vals=offsets, res_name=res_name,
-                                       num_cv_folds=n_cv, decoding_window=win, args=args, n_init=n_init, verbose=True, index=0)
-        np.save(res_name, HC_results)
-    elif args.dataset == "M1":
+    if args.dataset == "M1":
         print("M1:", M1['M1'].shape, M1['cursor'].shape)
         if not os.path.exists("results"):
             os.mkdir("results")
