@@ -4,6 +4,91 @@
 import numpy as np
 import torch
 import pdb
+from .data_util import CrossValidate, form_lag_matrix
+from sklearn.linear_model import LinearRegression as LR
+
+
+def linear_decode_r2(X_train, Y_train, X_test, Y_test, decoding_window=1, offset=0):
+    """Train a linear model on the training set and test on the test set.
+
+    This will work with batched training data and/or batched test data.
+
+    X_train : ndarray (time, channels) or (batches, time, channels)
+        Feature training data for regression.
+    Y_train : ndarray (time, channels) or (batches, time, channels)
+        Target training data for regression.
+    X_test : ndarray (time, channels) or (batches, time, channels)
+        Feature test data for regression.
+    Y_test : ndarray (time, channels) or (batches, time, channels)
+        Target test data for regression.
+    decoding_window : int
+        Number of time samples of X to use for predicting Y (should be odd). Centered around
+        offset value.
+    offset : int
+        Temporal offset for prediction (0 is same-time prediction).
+    """
+
+    if isinstance(X_train, np.ndarray) and X_train.ndim == 2:
+        X_train = [X_train]
+    if isinstance(Y_train, np.ndarray) and Y_train.ndim == 2:
+        Y_train = [Y_train]
+
+    if isinstance(X_test, np.ndarray) and X_test.ndim == 2:
+        X_test = [X_test]
+    if isinstance(Y_test, np.ndarray) and Y_test.ndim == 2:
+        Y_test = [Y_test]
+
+    X_train_lags = [form_lag_matrix(Xi, decoding_window) for Xi in X_train]
+    X_test_lags = [form_lag_matrix(Xi, decoding_window) for Xi in X_test]
+
+    Y_train = [Yi[decoding_window // 2:] for Yi in Y_train]
+    Y_train = [Yi[:len(Xi)] for Yi, Xi in zip(Y_train, X_train_lags)]
+    if offset >= 0:
+        Y_train = [Yi[offset:] for Yi in Y_train]
+    else:
+        Y_train = [Yi[:Yi.shape[0] + offset] for Yi in Y_train]
+
+    Y_test = [Yi[decoding_window // 2:] for Yi in Y_test]
+    Y_test = [Yi[:len(Xi)] for Yi, Xi in zip(Y_test, X_test_lags)]
+    if offset >= 0:
+        Y_test = [Yi[offset:] for Yi in Y_test]
+    else:
+        Y_test = [Yi[:Yi.shape[0] + offset] for Yi in Y_test]
+
+    if offset >= 0:
+        X_train_lags = [Xi[:Xi.shape[0] - offset] for Xi in X_train_lags]
+        X_test_lags = [Xi[:Xi.shape[0] - offset] for Xi in X_test_lags]
+    else:
+        X_train_lags = [Xi[-offset:] for Xi in X_train_lags]
+        X_test_lags = [Xi[-offset:] for Xi in X_test_lags]
+
+    if len(X_train_lags) == 1:
+        X_train_lags = X_train_lags[0]
+    else:
+        X_train_lags = np.concatenate(X_train_lags)
+
+    if len(Y_train) == 1:
+        Y_train = Y_train[0]
+    else:
+        Y_train = np.concatenate(Y_train)
+
+    if len(X_test_lags) == 1:
+        X_test_lags = X_test_lags[0]
+    else:
+        X_test_lags = np.concatenate(X_test_lags)
+
+    if len(Y_test) == 1:
+        Y_test = Y_test[0]
+    else:
+        Y_test = np.concatenate(Y_test)
+
+    try:
+        model = LR().fit(X_train_lags, Y_train)
+        r2 = model.score(X_test_lags, Y_test)
+    except:
+        return 0.0
+
+    return r2
 
 
 def gen_pos_indices(length, shifts):

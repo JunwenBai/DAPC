@@ -10,7 +10,7 @@ import torch
 import torch.nn.functional as F
 from .solver import LIN, DNN, RNN, TRANSFORMER, ortho_reg_fn, ortho_reg_Y
 from .cov_utils import calc_cov_from_data, calc_pi_from_cov, matrix_toeplitzify
-from .utils import make_non_pad_mask, pad_list, _context_concat, gen_batch_indices
+from .utils import make_non_pad_mask, pad_list, _context_concat, gen_batch_indices, linear_decode_r2
 from .spec_augment import spectral_masking
 from .vae import vdapc_loss
 from distutils.util import strtobool
@@ -372,7 +372,7 @@ class DAPC(torch.nn.Module):
 
 
 def fit_dapc(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu=False, batch_size=50, max_epochs=500,
-            device="cuda:0", snapshot='dapc_snapshot', X_match=None, Y_match=None, use_writer=True):
+            device="cuda:0", snapshot='dapc_snapshot', X_match=None, Y_match=None, use_writer=True, pred_data=None):
     if use_gpu:
         model = model.to(device)
 
@@ -387,6 +387,17 @@ def fit_dapc(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu
     n_batch_valid = int(math.ceil(n_valid / batch_size))
 
     best_mse = np.inf
+    best_r2 = -np.inf
+    best_epoch = -1
+
+    if pred_data is not None:
+        X_train_ctd = pred_data[0]
+        Y_train_ctd = pred_data[1]
+        X_test_ctd = pred_data[2]
+        Y_test_ctd = pred_data[3]
+        decoding_window = pred_data[4]
+        offset = pred_data[5]
+        args = pred_data[6]
 
     for epoch in range(max_epochs):
         model.train()
@@ -483,16 +494,30 @@ def fit_dapc(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu
         avg_cov = total_cov / n_batch_valid
         print("epoch %d, valid avg loss=%f, pi=%f, ortho_loss=%f, recon_loss=%f, rate_loss=%f" %
               (epoch, avg_loss_valid, avg_pi_valid, avg_ortho_loss_valid, avg_recon_loss_valid, avg_rate_loss_valid))
-        print(avg_cov_frame)
-        print(avg_cov)
+        #print(avg_cov_frame)
+        #print(avg_cov)
 
-        mse = evaluate_match(model, X_match, Y_match, verbose=0)
-        if mse < best_mse:
-            best_mse = mse
-            print("*** Updating best model! ***")
-            if not os.path.exists("snapshots"):
-                os.mkdir("snapshots")
-            torch.save(model.state_dict(), "snapshots/best_" + snapshot)
+        if pred_data is None:
+            mse = evaluate_match(model, X_match, Y_match, verbose=0)
+            if mse < best_mse:
+                best_mse = mse
+                print("*** Updating best model! ***")
+                if not os.path.exists("snapshots"):
+                    os.mkdir("snapshots")
+                torch.save(model.state_dict(), "snapshots/best_" + snapshot)
+        else:
+            X_train_dapc = model.encode(torch.from_numpy(X_train_ctd).to(device, dtype=model.dtype)).cpu().numpy()
+            X_test_dapc = model.encode(torch.from_numpy(X_test_ctd).to(device, dtype=model.dtype)).cpu().numpy()
+            r2_dapc = linear_decode_r2(X_train_dapc, Y_train_ctd, X_test_dapc, Y_test_ctd, decoding_window=decoding_window, offset=offset)
+            if r2_dapc > best_r2:
+                best_r2 = r2_dapc
+                best_epoch = epoch
+                print("*** Updating best model! ***")
+                if not os.path.exists("snapshots"):
+                    os.mkdir("snapshots")
+                if not os.path.exists("snapshots/{}".format(args.dataset)):
+                    os.mkdir("snapshots/{}".format(args.dataset))
+                torch.save(model.state_dict(), "snapshots/{}/best_{}-{}_{}".format(args.dataset, best_epoch, args.epochs, snapshot))
 
         if use_writer:
             writer.add_scalar('train/pi', avg_pi_train, epoch)
@@ -506,7 +531,11 @@ def fit_dapc(model, X_train, L_train, X_valid, L_valid, writer, lr=1e-3, use_gpu
             writer.add_scalar('valid/match_mse', mse, epoch)
 
     print("Resuming from best snapshot ...")
-    model.load_state_dict(torch.load("snapshots/best_" + snapshot))
+    if pred_data is None:
+        model.load_state_dict(torch.load("snapshots/best_" + snapshot))
+    else:
+        model.load_state_dict(torch.load("snapshots/{}/best_{}-{}_{}".format(args.dataset, best_epoch, args.epochs, snapshot)))
+
     return model
 
 def evaluate_match(model, X_match, Y_match, verbose=1):

@@ -188,3 +188,40 @@ def load_accel_data(filename, preprocess=True):
         X /= X.std(axis=0, keepdims=True)
     return X
 
+
+class CrossValidate:
+    def __init__(self, X, Y, num_folds, stack=True):
+        self.X, self.Y = X, Y
+        self.num_folds = num_folds
+        self.idxs = np.array_split(np.arange(len(X)), num_folds)
+        self.stack = stack
+
+    def __iter__(self):
+        self.fold_idx = 0
+        return self
+
+    def __next__(self):
+        fold_idx = self.fold_idx
+        if fold_idx == self.num_folds:
+            raise StopIteration
+
+        test_idxs = self.idxs[fold_idx]
+        train_idxs = []
+        if fold_idx > 0:
+            train_idxs.append(np.concatenate([self.idxs[ii] for ii in range(fold_idx)]))
+        if fold_idx < self.num_folds - 1:
+            train_idxs.append(np.concatenate([self.idxs[ii]
+                                              for ii in range(fold_idx + 1, self.num_folds)]))
+
+        X, Y = self.X, self.Y
+        X_test = X[test_idxs]
+        Y_test = Y[test_idxs]
+        if self.stack:
+            X_train = np.concatenate([X[idxs] for idxs in train_idxs])
+            Y_train = np.concatenate([Y[idxs] for idxs in train_idxs])
+        else:
+            X_train = [X[idxs] for idxs in train_idxs]
+            Y_train = [Y[idxs] for idxs in train_idxs]
+
+        self.fold_idx += 1
+        return X_train, X_test, Y_train, Y_test, fold_idx
