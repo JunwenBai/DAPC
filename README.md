@@ -8,10 +8,10 @@ Deep Autoencoding Predictive Components (DAPC) is a self-supervised representati
 on the intuition that useful representations of sequence data should exhibit a simple structure in the latent space. 
 
 We encourage this latent structure by maximizing an estimate of `predictive information` (PI) of latent feature sequences, and 
-regularize the learning through masked reconstruction, the full learning objective is described in [1](https://arxiv.org/abs/2010.03135). Here we use the same estimate of predictive information from the 
-recent work [Dynamical Components Analysis] [2](https://github.com/BouchardLab/DynamicalComponentsAnalysis) (and our implementation 
+regularize the learning through masked reconstruction; the full learning objective is described in [[1]](https://arxiv.org/abs/2010.03135). Here we use the same estimate of predictive information from the 
+recent work [Dynamical Components Analysis] [[2]](https://github.com/BouchardLab/DynamicalComponentsAnalysis) (and our implementation 
 of PI is modified from theirs). The masked reconstruction loss was applied to pretraining encoders for speech recognition 
-in [3](https://arxiv.org/abs/2001.10603).
+in [[3]](https://arxiv.org/abs/2001.10603).
 
 This repository mainly demonstrates the Lorenz Attractor experiments.
 
