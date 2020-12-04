@@ -9,7 +9,7 @@ on the intuition that useful representations of sequence data should exhibit a s
 
 We encourage this latent structure by maximizing an estimate of `predictive information` (PI) of latent feature sequences, and 
 regularize the learning through masked reconstruction; the full learning objective is described in [[1]](https://arxiv.org/abs/2010.03135). Here we use the same estimate of predictive information from the 
-recent work [Dynamical Components Analysis] [[2]](https://github.com/BouchardLab/DynamicalComponentsAnalysis) (and our implementation 
+recent work `Dynamical Components Analysis` [[2]](https://github.com/BouchardLab/DynamicalComponentsAnalysis) (and our implementation 
 of PI is modified from theirs). The masked reconstruction loss was applied to pretraining encoders for speech recognition 
 in [[3]](https://arxiv.org/abs/2001.10603).
 
@@ -69,8 +69,6 @@ If you are interested in our work, please consider cite the following paper:
 ```
 
 ### References
-
-[DCA](https://github.com/BouchardLab/DynamicalComponentsAnalysis)
 
 [1] Junwen Bai, Weiran Wang, Yingbo Zhou, and Caiming Xiong. Representation Learning for Sequence Data with Deep Autoencoding Predictive Components. arXiv:2010.03135 [cs.LG].  
 
