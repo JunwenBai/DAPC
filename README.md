@@ -3,7 +3,15 @@
 ### Overview
 
 <div align=center><img src="figs/DAPC.png" width="70%"></div>
-Deep Autoencoding Predictive Components (**DAPC**) is a self-supervised representation learning method for sequence data, based on the intuition that useful representations of sequence data should exhibit a simple structure in the latent space. We encourage this latent structure by maximizing an estimate of *predictive information* of latent feature sequences, and regularize the learning through masked reconstruction.
+
+Deep Autoencoding Predictive Components (DAPC) is a self-supervised representation learning method for sequence data, based 
+on the intuition that useful representations of sequence data should exhibit a simple structure in the latent space. 
+
+We encourage this latent structure by maximizing an estimate of `predictive information` (PI) of latent feature sequences, and 
+regularize the learning through masked reconstruction, the full learning objective is described in [1](https://arxiv.org/abs/2010.03135). Here we use the same estimate of predictive information from the 
+recent work [Dynamical Components Analysis] [2](https://github.com/BouchardLab/DynamicalComponentsAnalysis) (and our implementation 
+of PI is modified from theirs). The masked reconstruction loss was applied to pretraining encoders for speech recognition 
+in [3](https://arxiv.org/abs/2001.10603).
 
 This repository mainly demonstrates the Lorenz Attractor experiments.
 
@@ -47,8 +55,6 @@ To run the probabilistic DAPC
 
 One can inspect the bashes to see all the options for training. By default, we use `gpu:0`.
 
-`transformer` folder mostly inherits from [ESPnet](https://github.com/espnet/espnet). Though the options are provided, we do not encourage one to use `transformer` in this small-scale problem.
-
 ### Paper
 
 If you are interested in our work, please consider cite the following paper:
@@ -66,6 +72,8 @@ If you are interested in our work, please consider cite the following paper:
 
 [DCA](https://github.com/BouchardLab/DynamicalComponentsAnalysis)
 
-Clark, D., Livezey, J. and Bouchard, K.. Unsupervised discovery of temporal structure in noisy data with dynamical components analysis. In *Advances in Neural Information Processing Systems*, 2019.
+[1] Junwen Bai, Weiran Wang, Yingbo Zhou, and Caiming Xiong. Representation Learning for Sequence Data with Deep Autoencoding Predictive Components. arXiv:2010.03135 [cs.LG].  
 
-Watanabe, S., Hori, T., Karita, S., Hayashi, T., Nishitoba, J., Unno, Y., Soplin, N.E.Y., Heymann, J., Wiesner, M., Chen, N. and Renduchintala, A.. ESPnet: End-to-End Speech Processing Toolkit. Proc. Interspeech, 2018.
+[2] Clark, D., Livezey, J. and Bouchard, K.. Unsupervised discovery of temporal structure in noisy data with dynamical components analysis. In *Advances in Neural Information Processing Systems*, 2019.
+
+[3] Weiran Wang, Qingming Tang, and Karen Livescu. Unsupervised Pre-training of Bidirectional Speech Encoders via Masked Reconstruction. ICASSP, 2020.
