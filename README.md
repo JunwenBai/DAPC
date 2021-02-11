@@ -9,9 +9,9 @@ on the intuition that useful representations of sequence data should exhibit a s
 
 We encourage this latent structure by maximizing an estimate of `predictive information` (PI) of latent feature sequences, and 
 regularize the learning through masked reconstruction; the full learning objective is described in [[1]](https://arxiv.org/abs/2010.03135). Here we use the same estimate of predictive information from the 
-recent work `Dynamical Components Analysis` [[2]](https://github.com/BouchardLab/DynamicalComponentsAnalysis) (and our implementation 
+recent work `Dynamical Components Analysis` [[3]](https://github.com/BouchardLab/DynamicalComponentsAnalysis) (and our implementation 
 of PI is modified from theirs). The masked reconstruction loss was applied to pretraining encoders for speech recognition 
-in [[3]](https://arxiv.org/abs/2001.10603).
+in [[2]](https://arxiv.org/abs/2001.10603).
 
 This repository mainly demonstrates the Lorenz Attractor experiments.
 
@@ -70,8 +70,8 @@ If you are interested in our work, please consider cite the following paper:
 
 ### References
 
-[1] Junwen Bai, Weiran Wang, Yingbo Zhou, and Caiming Xiong. Representation Learning for Sequence Data with Deep Autoencoding Predictive Components. *arXiv:2010.03135 [cs.LG]*.  
+[1] Junwen Bai, Weiran Wang, Yingbo Zhou, and Caiming Xiong. Representation Learning for Sequence Data with Deep Autoencoding Predictive Components. In *International Conference on Learning Representations*, 2021.
 
-[2] Clark, D., Livezey, J. and Bouchard, K.. Unsupervised discovery of temporal structure in noisy data with dynamical components analysis. In *Advances in Neural Information Processing Systems*, 2019.
+[2] Weiran Wang, Qingming Tang, and Karen Livescu. Unsupervised Pre-training of Bidirectional Speech Encoders via Masked Reconstruction. In *ICASSP*, 2020.
 
-[3] Weiran Wang, Qingming Tang, and Karen Livescu. Unsupervised Pre-training of Bidirectional Speech Encoders via Masked Reconstruction. In *ICASSP*, 2020.
+[3] Clark, D., Livezey, J. and Bouchard, K.. Unsupervised discovery of temporal structure in noisy data with dynamical components analysis. In *Advances in Neural Information Processing Systems*, 2019.
