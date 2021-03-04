@@ -60,11 +60,13 @@ One can inspect the bashes to see all the options for training. By default, we u
 If you are interested in our work, please consider cite the following paper:
 
 ```bibtex
-@article{bai2020representation,
-  title={Representation Learning for Sequence Data with Deep Autoencoding Predictive Components},
-  author={Bai, Junwen and Wang, Weiran and Zhou, Yingbo and Xiong, Caiming},
-  journal={arXiv preprint arXiv:2010.03135},
-  year={2020}
+@inproceedings{
+	bai2021representation,
+	title={Representation Learning for Sequence Data with Deep Autoencoding Predictive Components},
+	author={Junwen Bai and Weiran Wang and Yingbo Zhou and Caiming Xiong},
+	booktitle={International Conference on Learning Representations},
+	year={2021},
+	url={https://openreview.net/forum?id=Naqw7EHIfrv}
 }
 ```
 
