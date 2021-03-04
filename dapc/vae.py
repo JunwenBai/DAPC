@@ -1,11 +1,13 @@
-# Copyright 2020 Salesforce Research (Junwen Bai, Weiran Wang)
-# Licensed under the Apache License, Version 2.0 (the "License")
+# Copyright (c) 2021, salesforce.com, inc.
+# All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
+
+# Salesforce Research (Junwen Bai, Weiran Wang)
 
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal as MVN
 from .math import log_density_gaussian, log_importance_weight_matrix, matrix_log_density_gaussian
-import pdb
-
 
 def vdapc_loss(latent_dist, latent_sample, latent_mask, T, cov, post_L, alpha=0., beta=0., gamma=1., zeta=1.):
     batch_size, seq_len, d = latent_sample.shape

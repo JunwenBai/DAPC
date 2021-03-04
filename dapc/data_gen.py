@@ -1,5 +1,9 @@
-# *** License Agreement ***
-# Dynamical Components Analysis (DCA) Copyright (c) 2021, The Regents of the University of California, through Lawrence Berkeley National Laboratory (subject to receipt of any required approvals from the U.S. Dept. of Energy). All rights reserved.
+# Copyright (c) 2021, salesforce.com, inc.
+# All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
+
+# Salesforce Research (Junwen Bai, Weiran Wang)
 
 import numpy as np
 import torch
